@@ -71,8 +71,21 @@ class GDBSession:
                 time_to_check_for_additional_output_sec=time_to_check_for_additional_output_sec
             )
 
-            # Get initial responses
+            # Get initial responses from GDB startup
             responses = self.controller.get_gdb_response(timeout_sec=2)
+
+            # Parse initial startup messages
+            startup_result = self._parse_responses(responses)
+            startup_console = "".join(startup_result.get("console", []))
+
+            # Check for common warnings/issues in startup
+            warnings = []
+            if "no debugging symbols found" in startup_console.lower():
+                warnings.append("No debugging symbols found - program was not compiled with -g")
+            if "not in executable format" in startup_console.lower():
+                warnings.append("File is not an executable")
+            if "no such file" in startup_console.lower():
+                warnings.append("Program file not found")
 
             # Run initialization commands if provided
             init_output = []
@@ -88,12 +101,25 @@ class GDBSession:
 
             self.is_running = True
 
-            return {
+            result = {
                 "status": "success",
                 "message": f"GDB session started",
                 "program": program,
-                "init_output": init_output if init_output else None
             }
+
+            # Include startup messages if there were any
+            if startup_console.strip():
+                result["startup_output"] = startup_console.strip()
+
+            # Include warnings if any detected
+            if warnings:
+                result["warnings"] = warnings
+
+            # Include init command output if any
+            if init_output:
+                result["init_output"] = init_output
+
+            return result
 
         except Exception as e:
             logger.error(f"Failed to start GDB session: {e}")

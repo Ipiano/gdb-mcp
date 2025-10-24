@@ -72,8 +72,12 @@ async def list_tools() -> list[Tool]:
             name="gdb_start_session",
             description=(
                 "Start a new GDB debugging session. Can load an executable, core dump, "
-                "or run custom initialization commands. Examples: "
-                "'core-file /path/to/core', 'set sysroot /path', 'set solib-search-path /path'"
+                "or run custom initialization commands. "
+                "Automatically detects and reports important warnings such as: "
+                "missing debug symbols (not compiled with -g), file not found, or invalid executable. "
+                "Check the 'warnings' field in the response for critical issues that may affect debugging. "
+                "Examples of init_commands: 'core-file /path/to/core', 'set sysroot /path', "
+                "'set solib-search-path /path'"
             ),
             inputSchema=StartSessionArgs.model_json_schema(),
         ),
