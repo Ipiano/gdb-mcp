@@ -1,5 +1,7 @@
 """GDB/MI interface for programmatic control of GDB sessions."""
 
+import os
+import signal
 import subprocess
 from typing import Optional, List, Dict, Any
 from pygdbmi.gdbcontroller import GdbController
@@ -271,6 +273,47 @@ class GDBSession:
     def next(self) -> Dict[str, Any]:
         """Step over (next line)."""
         return self.execute_command("-exec-next")
+
+    def interrupt(self) -> Dict[str, Any]:
+        """
+        Interrupt (pause) a running program.
+
+        This sends SIGINT to the GDB process, which pauses the debugged program.
+        Use this when the program is running and you want to pause it to inspect
+        state, set breakpoints, or perform other debugging operations.
+
+        Returns:
+            Dict with status and message
+        """
+        if not self.controller:
+            return {"status": "error", "message": "No active GDB session"}
+
+        if not self.controller.gdb_process:
+            return {"status": "error", "message": "No GDB process running"}
+
+        try:
+            # Send SIGINT to pause the running program
+            os.kill(self.controller.gdb_process.pid, signal.SIGINT)
+
+            # Give GDB a moment to process the interrupt
+            import time
+            time.sleep(0.1)
+
+            # Get the response
+            responses = self.controller.get_gdb_response(timeout_sec=2)
+            result = self._parse_responses(responses)
+
+            return {
+                "status": "success",
+                "message": "Program interrupted (paused)",
+                "result": result
+            }
+        except Exception as e:
+            logger.error(f"Failed to interrupt program: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to interrupt: {str(e)}"
+            }
 
     def evaluate_expression(self, expression: str) -> Dict[str, Any]:
         """

@@ -263,11 +263,28 @@ Set a breakpoint at a location.
 #### `gdb_continue`
 Continue execution until next breakpoint.
 
+**IMPORTANT:** Only use when program is PAUSED (at a breakpoint). If program hasn't started, use `gdb_execute_command` with "run" instead.
+
 #### `gdb_step`
 Step into next instruction (enters functions).
 
+**IMPORTANT:** Only works when program is PAUSED at a specific location.
+
 #### `gdb_next`
 Step over to next line (doesn't enter functions).
+
+**IMPORTANT:** Only works when program is PAUSED at a specific location.
+
+#### `gdb_interrupt`
+Interrupt (pause) a running program.
+
+**Use when:**
+- Program is running and hasn't hit a breakpoint
+- You want to pause execution to inspect state
+- Program appears stuck and you want to see where it is
+- Commands are timing out because program is running
+
+**After interrupting:** You can use `gdb_get_backtrace`, `gdb_get_variables`, etc.
 
 ### Data Inspection
 
@@ -440,8 +457,24 @@ When attaching to processes, you may need:
 echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
 ```
 
-### Timeout Errors
-For slow operations, increase the timeout:
+### Timeout Errors / Commands Not Responding
+
+**Problem:** Commands time out with "Did not get response from gdb after X seconds"
+
+**Common Cause:** The program is still running! When a program is running (hasn't hit a breakpoint, hasn't finished), GDB is busy and won't respond to other commands.
+
+**Solution:**
+1. Use `gdb_interrupt` to pause the running program
+2. After interrupting, other commands will work again
+3. Check if breakpoints were actually hit (they won't trigger if program exits before reaching them)
+
+**Understanding Program States:**
+- **Not started**: Use `gdb_execute_command` with "run" or "start"
+- **Running**: Program is executing - use `gdb_interrupt` to pause it
+- **Paused** (at breakpoint): Use `gdb_continue`, `gdb_step`, `gdb_next`, inspect variables
+- **Finished**: Program has exited - restart with "run" if needed
+
+**For genuinely slow operations,** increase the timeout:
 ```json
 {
   "command": "...",
