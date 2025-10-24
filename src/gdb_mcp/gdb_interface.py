@@ -346,19 +346,11 @@ class GDBSession:
         List all breakpoints.
 
         Returns:
-            Dict with list of breakpoints
+            Dict with list of breakpoints (from execute_command)
         """
         # Use CLI command for more readable output
-        result = self.execute_command("info breakpoints")
-
-        if result["status"] == "error":
-            return result
-
-        return {
-            "status": "success",
-            "output": result.get("output", ""),
-            "raw_result": result
-        }
+        # execute_command already returns properly formatted output for CLI commands
+        return self.execute_command("info breakpoints")
 
     def continue_execution(self) -> Dict[str, Any]:
         """Continue execution of the program."""
