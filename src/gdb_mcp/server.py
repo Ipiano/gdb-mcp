@@ -137,9 +137,12 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="gdb_list_breakpoints",
             description=(
-                "List all breakpoints with their status, locations, and hit counts. "
-                "Use this to verify breakpoints were set correctly and see which ones "
-                "have been hit. Shows breakpoint numbers, types, addresses, and source locations."
+                "List all breakpoints as structured data with detailed information. "
+                "Returns an array of breakpoint objects, each containing: number, type, "
+                "enabled status, address, function name, source file, line number, and hit count. "
+                "Use this to verify breakpoints were set correctly, check which have been hit "
+                "(times field), and inspect their exact locations. "
+                "Much easier to filter and analyze than text output."
             ),
             inputSchema={
                 "type": "object",

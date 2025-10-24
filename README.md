@@ -294,6 +294,54 @@ Set a breakpoint at a location.
 - `location: "*0x12345678"` - Break at memory address
 - `condition: "x > 10"` - Only break when x > 10
 
+#### `gdb_list_breakpoints`
+List all breakpoints with structured data.
+
+**Returns:**
+- `status`: "success" or "error"
+- `breakpoints`: Array of breakpoint objects
+- `count`: Total number of breakpoints
+
+**Each breakpoint object contains:**
+- `number`: Breakpoint number (string)
+- `type`: "breakpoint", "watchpoint", etc.
+- `enabled`: "y" or "n"
+- `addr`: Memory address (e.g., "0x0000000000401234")
+- `func`: Function name (if available)
+- `file`: Source file name (if available)
+- `fullname`: Full path to source file (if available)
+- `line`: Line number (if available)
+- `times`: Number of times this breakpoint has been hit (string)
+- `original-location`: Original location string used to set the breakpoint
+
+**Example output:**
+```json
+{
+  "status": "success",
+  "breakpoints": [
+    {
+      "number": "1",
+      "type": "breakpoint",
+      "enabled": "y",
+      "addr": "0x0000000000016cd5",
+      "func": "HeapColorStrategy::operator()",
+      "file": "color_strategy.hpp",
+      "fullname": "/home/user/project/src/color_strategy.hpp",
+      "line": "119",
+      "times": "3",
+      "original-location": "color_strategy.hpp:119"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Use this to:**
+- Verify breakpoints were set at correct locations
+- Check which breakpoints have been hit (times > 0)
+- Find breakpoint numbers for deletion
+- Confirm file paths resolved correctly
+
 #### `gdb_continue`
 Continue execution until next breakpoint.
 
