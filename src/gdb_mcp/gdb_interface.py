@@ -106,8 +106,11 @@ class GDBSession:
         """
         Execute a GDB command and return the parsed response.
 
+        Automatically handles both MI commands (starting with '-') and CLI commands.
+        CLI commands are wrapped with -interpreter-exec for proper output capture.
+
         Args:
-            command: GDB command to execute (without the -interpreter-exec prefix)
+            command: GDB command to execute (MI or CLI command)
             timeout_sec: Timeout for command execution
 
         Returns:
@@ -120,17 +123,41 @@ class GDBSession:
             }
 
         try:
+            # Detect if this is a CLI command (doesn't start with '-')
+            # CLI commands need to be wrapped with -interpreter-exec
+            is_cli_command = not command.strip().startswith('-')
+            actual_command = command
+
+            if is_cli_command:
+                # Escape quotes in the command
+                escaped_command = command.replace('"', '\\"')
+                actual_command = f'-interpreter-exec console "{escaped_command}"'
+                logger.debug(f"Wrapping CLI command: {command} -> {actual_command}")
+
             # Send command and get response
-            responses = self.controller.write(command, timeout_sec=timeout_sec)
+            responses = self.controller.write(actual_command, timeout_sec=timeout_sec)
 
             # Parse responses
             result = self._parse_responses(responses)
 
-            return {
-                "status": "success",
-                "command": command,
-                "result": result
-            }
+            # For CLI commands, format the output more clearly
+            if is_cli_command:
+                # Combine all console output
+                console_output = "".join(result.get("console", []))
+
+                return {
+                    "status": "success",
+                    "command": command,
+                    "output": console_output.strip() if console_output else "(no output)",
+                    "raw_result": result  # Keep raw result for debugging
+                }
+            else:
+                # For MI commands, return structured result
+                return {
+                    "status": "success",
+                    "command": command,
+                    "result": result
+                }
 
         except Exception as e:
             logger.error(f"Command execution failed: {e}")

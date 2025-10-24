@@ -215,11 +215,32 @@ Start a new GDB debugging session.
 ```
 
 #### `gdb_execute_command`
-Execute any GDB command directly.
+Execute any GDB command directly. Supports both CLI and MI commands.
 
 **Parameters:**
-- `command`: GDB command to execute
+- `command`: GDB command to execute (CLI or MI format)
 - `timeout_sec`: Timeout in seconds (default: 5)
+
+**Automatically handles two types of commands:**
+
+1. **CLI Commands** (traditional GDB commands):
+   - Examples: `info breakpoints`, `list`, `print x`, `run`, `backtrace`
+   - Output is formatted as readable text
+   - These are the commands you'd type in interactive GDB
+
+2. **MI Commands** (Machine Interface commands, start with `-`):
+   - Examples: `-break-list`, `-exec-run`, `-data-evaluate-expression`
+   - Return structured data
+   - More precise but less human-readable
+
+**Common CLI commands:**
+- `info breakpoints` - List all breakpoints
+- `info threads` - List all threads
+- `run` - Start the program
+- `print variable` - Print a variable's value
+- `backtrace` - Show call stack
+- `list` - Show source code
+- `disassemble` - Show assembly code
 
 #### `gdb_get_status`
 Get the current status of the GDB session.
