@@ -122,7 +122,12 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="gdb_continue",
-            description="Continue execution of the program until next breakpoint or completion.",
+            description=(
+                "Continue execution of the program until next breakpoint or completion. "
+                "IMPORTANT: Only use this when the program is PAUSED (e.g., at a breakpoint). "
+                "If the program hasn't been started yet, use gdb_execute_command with 'run' instead. "
+                "If the program is already running, this will fail - use gdb_interrupt to pause it first."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -130,7 +135,11 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="gdb_step",
-            description="Step into the next instruction (enters function calls).",
+            description=(
+                "Step into the next instruction (enters function calls). "
+                "IMPORTANT: Only works when program is PAUSED at a specific location. "
+                "Use this for single-stepping through code to debug line-by-line."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -138,7 +147,26 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="gdb_next",
-            description="Step over to the next line (doesn't enter function calls).",
+            description=(
+                "Step over to the next line (doesn't enter function calls). "
+                "IMPORTANT: Only works when program is PAUSED at a specific location. "
+                "Use this to step over function calls without entering them."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+        Tool(
+            name="gdb_interrupt",
+            description=(
+                "Interrupt (pause) a running program. Use this when: "
+                "1) The program is running and hasn't hit a breakpoint, "
+                "2) You want to pause execution to inspect state or set breakpoints, "
+                "3) The program appears stuck or you want to see where it is. "
+                "After interrupting, you can use other commands like gdb_get_backtrace, "
+                "gdb_get_variables, or gdb_continue."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -226,6 +254,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         elif name == "gdb_next":
             result = gdb_session.next()
+
+        elif name == "gdb_interrupt":
+            result = gdb_session.interrupt()
 
         elif name == "gdb_evaluate_expression":
             args = EvaluateExpressionArgs(**arguments)
