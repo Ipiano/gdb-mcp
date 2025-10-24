@@ -343,14 +343,39 @@ class GDBSession:
 
     def list_breakpoints(self) -> Dict[str, Any]:
         """
-        List all breakpoints.
+        List all breakpoints with structured data.
 
         Returns:
-            Dict with list of breakpoints (from execute_command)
+            Dict with array of breakpoint objects containing:
+            - number: Breakpoint number
+            - type: Type (breakpoint, watchpoint, etc.)
+            - enabled: Whether enabled (y/n)
+            - addr: Memory address
+            - func: Function name (if available)
+            - file: Source file (if available)
+            - fullname: Full path to source file (if available)
+            - line: Line number (if available)
+            - times: Number of times hit
+            - original-location: Original location string
         """
-        # Use CLI command for more readable output
-        # execute_command already returns properly formatted output for CLI commands
-        return self.execute_command("info breakpoints")
+        # Use MI command for structured output
+        result = self.execute_command("-break-list")
+
+        if result["status"] == "error":
+            return result
+
+        # Extract breakpoint table from MI result
+        mi_result = result.get("result", {}).get("result", {})
+
+        # The MI response has a BreakpointTable with body containing array of bkpt objects
+        bp_table = mi_result.get("BreakpointTable", {})
+        breakpoints = bp_table.get("body", [])
+
+        return {
+            "status": "success",
+            "breakpoints": breakpoints,
+            "count": len(breakpoints)
+        }
 
     def continue_execution(self) -> Dict[str, Any]:
         """Continue execution of the program."""
