@@ -27,12 +27,54 @@ This server uses the **GDB/MI (Machine Interface)** protocol, which is the same 
 - Python 3.10 or higher
 - GDB installed and available in PATH
 
-### Install the package
+### Option 1: Automated Setup with Virtual Environment (Recommended)
+
+The easiest way to set up the project with isolated dependencies:
+
+**Linux/macOS:**
+```bash
+cd /path/to/gdb-mcp
+./setup-venv.sh
+```
+
+**Windows:**
+```cmd
+cd \path\to\gdb-mcp
+setup-venv.bat
+```
+
+The script will:
+1. Create a virtual environment in `venv/`
+2. Install all dependencies
+3. Install the package in editable mode
+4. Display the configuration for your MCP client
+
+### Option 2: Manual Virtual Environment Setup
+
+```bash
+# Create virtual environment
+python3 -m venv venv
+
+# Activate it
+source venv/bin/activate  # Linux/macOS
+# or
+venv\Scripts\activate     # Windows
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Install package in editable mode
+pip install -e .
+```
+
+### Option 3: Global Installation (Not Recommended)
 
 ```bash
 # From the project directory
 pip install -e .
 ```
+
+Note: Global installation may conflict with other Python packages. Virtual environments are recommended.
 
 ## Configuration
 
@@ -43,6 +85,38 @@ Add this to your Claude Desktop configuration file:
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Linux**: `~/.config/Claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+#### Using Virtual Environment (Recommended)
+
+Point to the Python executable in your virtual environment:
+
+**Linux/macOS:**
+```json
+{
+  "mcpServers": {
+    "gdb": {
+      "command": "/absolute/path/to/gdb-mcp/venv/bin/python",
+      "args": ["-m", "gdb_mcp"]
+    }
+  }
+}
+```
+
+**Windows:**
+```json
+{
+  "mcpServers": {
+    "gdb": {
+      "command": "C:\\absolute\\path\\to\\gdb-mcp\\venv\\Scripts\\python.exe",
+      "args": ["-m", "gdb_mcp"]
+    }
+  }
+}
+```
+
+#### Using Global Installation
+
+If you installed globally (not recommended):
 
 ```json
 {
@@ -55,7 +129,7 @@ Add this to your Claude Desktop configuration file:
 }
 ```
 
-If you installed via pip, you can also use:
+Or if you have the script in your PATH:
 
 ```json
 {
@@ -69,15 +143,20 @@ If you installed via pip, you can also use:
 
 ### Other MCP Clients
 
-The server uses stdio for communication and can be used with any MCP-compatible client. Run it with:
+The server uses stdio for communication and can be used with any MCP-compatible client.
 
+**If using virtual environment:**
 ```bash
-python -m gdb_mcp
+# From project directory
+./venv/bin/python -m gdb_mcp  # Linux/macOS
+# or
+venv\Scripts\python.exe -m gdb_mcp  # Windows
 ```
 
-or
-
+**If installed globally:**
 ```bash
+python -m gdb_mcp
+# or
 gdb-mcp-server
 ```
 
