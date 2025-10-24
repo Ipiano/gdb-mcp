@@ -124,9 +124,23 @@ async def list_tools() -> list[Tool]:
             name="gdb_set_breakpoint",
             description=(
                 "Set a breakpoint at a function, file:line, or address. "
-                "Supports conditional breakpoints and temporary breakpoints."
+                "Supports conditional breakpoints and temporary breakpoints. "
+                "Returns breakpoint details including number, address, and location. "
+                "Use gdb_list_breakpoints to verify breakpoints were set correctly."
             ),
             inputSchema=SetBreakpointArgs.model_json_schema(),
+        ),
+        Tool(
+            name="gdb_list_breakpoints",
+            description=(
+                "List all breakpoints with their status, locations, and hit counts. "
+                "Use this to verify breakpoints were set correctly and see which ones "
+                "have been hit. Shows breakpoint numbers, types, addresses, and source locations."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
         ),
         Tool(
             name="gdb_continue",
@@ -253,6 +267,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 condition=args.condition,
                 temporary=args.temporary
             )
+
+        elif name == "gdb_list_breakpoints":
+            result = gdb_session.list_breakpoints()
 
         elif name == "gdb_continue":
             result = gdb_session.continue_execution()

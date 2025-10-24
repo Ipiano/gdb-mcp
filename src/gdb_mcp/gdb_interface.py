@@ -282,11 +282,55 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        bp_data = result["result"].get("result", {})
+        # The MI result payload is in result["result"]["result"]
+        # This contains the actual GDB/MI command result
+        mi_result = result.get("result", {}).get("result")
+
+        # Debug logging
+        logger.debug(f"Breakpoint MI result: {mi_result}")
+
+        if mi_result is None:
+            logger.warning(f"No MI result for breakpoint at {location}")
+            return {
+                "status": "error",
+                "message": f"Failed to set breakpoint at {location}: no result from GDB",
+                "raw_result": result
+            }
+
+        # The breakpoint data should be in the "bkpt" field
+        bp_info = mi_result if isinstance(mi_result, dict) else {}
+        breakpoint = bp_info.get("bkpt", bp_info)  # Sometimes it's directly in the result
+
+        if not breakpoint:
+            logger.warning(f"Empty breakpoint result for {location}: {mi_result}")
+            return {
+                "status": "error",
+                "message": f"Breakpoint set but no info returned for {location}",
+                "raw_result": result
+            }
 
         return {
             "status": "success",
-            "breakpoint": bp_data.get("bkpt", {})
+            "breakpoint": breakpoint
+        }
+
+    def list_breakpoints(self) -> Dict[str, Any]:
+        """
+        List all breakpoints.
+
+        Returns:
+            Dict with list of breakpoints
+        """
+        # Use CLI command for more readable output
+        result = self.execute_command("info breakpoints")
+
+        if result["status"] == "error":
+            return result
+
+        return {
+            "status": "success",
+            "output": result.get("output", ""),
+            "raw_result": result
         }
 
     def continue_execution(self) -> Dict[str, Any]:
