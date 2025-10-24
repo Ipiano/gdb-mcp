@@ -58,8 +58,9 @@ class GDBSession:
 
         try:
             # Start GDB in MI mode
-            # Build command list: [gdb_path, --interpreter=mi, ...]
-            gdb_command = [gdb_path, "--interpreter=mi"]
+            # Build command list: [gdb_path, --quiet, --interpreter=mi, ...]
+            # --quiet suppresses the copyright/license banner
+            gdb_command = [gdb_path, "--quiet", "--interpreter=mi"]
             if program:
                 gdb_command.extend(["--args", program])
                 if args:
