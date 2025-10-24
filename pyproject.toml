@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
-gdb-mcp-server = "gdb_mcp.server:main"
+gdb-mcp-server = "gdb_mcp.server:run_server"
 
 [project.optional-dependencies]
 dev = [

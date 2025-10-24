@@ -268,7 +268,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
 
 async def main():
-    """Main entry point for the MCP server."""
+    """Main async entry point for the MCP server."""
     from mcp.server.stdio import stdio_server
 
     async with stdio_server() as (read_stream, write_stream):
@@ -280,5 +280,10 @@ async def main():
         )
 
 
-if __name__ == "__main__":
+def run_server():
+    """Synchronous entry point for the MCP server (for script entry point)."""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run_server()
