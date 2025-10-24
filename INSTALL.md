@@ -2,6 +2,40 @@
 
 ## TL;DR - Fast Setup
 
+### Recommended: Using pipx (Simplest)
+
+**1. Install pipx if not already installed:**
+```bash
+python3 -m pip install --user pipx
+python3 -m pipx ensurepath
+```
+
+**2. Install gdb-mcp-server:**
+```bash
+cd /path/to/gdb-mcp
+pipx install .
+# For developers: pipx install -e .
+```
+
+**3. Add to Claude Desktop config:**
+```json
+{
+  "mcpServers": {
+    "gdb": {
+      "command": "gdb-mcp-server"
+    }
+  }
+}
+```
+
+**4. Restart Claude Desktop**
+
+That's it! No paths, no virtual environment management needed.
+
+---
+
+### Alternative: Using Virtual Environment
+
 **1. Run the setup script:**
 ```bash
 ./setup-venv.sh  # Linux/macOS
@@ -13,11 +47,124 @@ setup-venv.bat   # Windows
 
 **3. Restart Claude Desktop**
 
-That's it!
-
 ---
 
 ## Detailed Instructions
+
+## Method 1: pipx Installation (Recommended)
+
+### Step 1: Install pipx
+
+If you don't have pipx installed:
+
+**Linux/macOS:**
+```bash
+python3 -m pip install --user pipx
+python3 -m pipx ensurepath
+# Restart your terminal or run: source ~/.bashrc (or ~/.zshrc)
+```
+
+**Windows:**
+```cmd
+py -m pip install --user pipx
+py -m pipx ensurepath
+# Restart your terminal
+```
+
+**Or use package managers:**
+```bash
+# Ubuntu/Debian
+sudo apt install pipx
+
+# macOS
+brew install pipx
+
+# Fedora
+sudo dnf install pipx
+```
+
+### Step 2: Clone/Download the Project
+
+```bash
+cd /path/to/your/projects
+git clone <repository-url> gdb-mcp
+cd gdb-mcp
+```
+
+### Step 3: Install with pipx
+
+**For regular users:**
+```bash
+pipx install .
+```
+
+**For developers (editable mode):**
+```bash
+pipx install -e .
+```
+
+This installs the `gdb-mcp-server` command globally, isolated from other Python packages.
+
+### Step 4: Verify Installation
+
+```bash
+# Test the command works
+which gdb-mcp-server  # Linux/macOS
+# or
+where gdb-mcp-server  # Windows
+
+# Test the server starts
+gdb-mcp-server  # Press Ctrl+C to stop
+```
+
+You should see: `INFO:gdb_mcp.server:GDB MCP Server starting...`
+
+### Step 5: Configure Your MCP Client
+
+1. Find your Claude Desktop config file location:
+   - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - **Linux**: `~/.config/Claude/claude_desktop_config.json`
+   - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+2. Edit the file (create if it doesn't exist)
+
+3. Add this simple configuration:
+
+```json
+{
+  "mcpServers": {
+    "gdb": {
+      "command": "gdb-mcp-server"
+    }
+  }
+}
+```
+
+Or with explicit type (optional):
+
+```json
+{
+  "mcpServers": {
+    "gdb": {
+      "command": "gdb-mcp-server",
+      "args": [],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+That's it! No paths needed - pipx makes the command globally available.
+
+### Step 6: Restart Claude Desktop and Test
+
+1. Close and reopen Claude Desktop
+2. Try asking: "Do you have access to GDB debugging tools?"
+3. Claude should confirm it has access to the `gdb_*` tools
+
+---
+
+## Method 2: Virtual Environment Installation
 
 ### Step 1: Clone/Download the Project
 
@@ -70,16 +217,14 @@ If you see errors, check the Troubleshooting section below.
 
 ### Step 3: Configure Your MCP Client
 
-#### For Claude Desktop
-
-1. Find your config file location:
+1. Find your Claude Desktop config file location:
    - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
    - **Linux**: `~/.config/Claude/claude_desktop_config.json`
    - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 2. Edit the file (create if it doesn't exist)
 
-3. Add the GDB MCP server configuration:
+3. Add the GDB MCP server configuration with absolute paths:
 
 **Example for macOS/Linux** (adjust path to match your installation):
 ```json
