@@ -56,15 +56,16 @@ class GDBSession:
 
         try:
             # Start GDB in MI mode
-            gdb_args = ["--interpreter=mi"]
+            # Build command list: [gdb_path, --interpreter=mi, ...]
+            gdb_command = [gdb_path, "--interpreter=mi"]
             if program:
-                gdb_args.extend(["--args", program])
+                gdb_command.extend(["--args", program])
                 if args:
-                    gdb_args.extend(args)
+                    gdb_command.extend(args)
 
+            # pygdbmi 0.11+ uses 'command' parameter instead of 'gdb_path' and 'gdb_args'
             self.controller = GdbController(
-                gdb_path=gdb_path,
-                gdb_args=gdb_args,
+                command=gdb_command,
                 time_to_check_for_additional_output_sec=time_to_check_for_additional_output_sec
             )
 
