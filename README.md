@@ -204,6 +204,19 @@ Start a new GDB debugging session.
 - `args` (optional): Command-line arguments for the program
 - `init_commands` (optional): List of GDB commands to run on startup
 
+**Returns:**
+- `status`: "success" or "error"
+- `message`: Status message
+- `program`: Program path
+- `startup_output` (optional): GDB's initial output when loading the program
+- `warnings` (optional): Array of critical warnings detected, such as:
+  - "No debugging symbols found - program was not compiled with -g"
+  - "File is not an executable"
+  - "Program file not found"
+- `init_output` (optional): Output from init_commands if provided
+
+**Important:** Always check the `warnings` field! Missing debug symbols will prevent breakpoints from working and variable inspection from showing useful information.
+
 **Example init_commands:**
 ```python
 [
