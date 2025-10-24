@@ -26,10 +26,48 @@ This server uses the **GDB/MI (Machine Interface)** protocol, which is the same 
 
 - Python 3.10 or higher
 - GDB installed and available in PATH
+- `pipx` (recommended) - [Installation instructions](https://pipx.pypa.io/stable/installation/)
 
-### Option 1: Automated Setup with Virtual Environment (Recommended)
+### Option 1: Using pipx (Recommended)
 
-The easiest way to set up the project with isolated dependencies:
+`pipx` installs the package in an isolated environment and makes the command globally available. This is the simplest and cleanest approach.
+
+**For regular users:**
+```bash
+# Install from the repository directory
+cd /path/to/gdb-mcp
+pipx install .
+
+# Or install directly from git (future)
+# pipx install git+https://github.com/yourusername/gdb-mcp.git
+```
+
+**For developers (editable mode):**
+```bash
+# Install in editable mode for development
+cd /path/to/gdb-mcp
+pipx install -e .
+```
+
+**Installing pipx** (if not already installed):
+```bash
+# Linux/macOS
+python3 -m pip install --user pipx
+python3 -m pipx ensurepath
+
+# Windows
+py -m pip install --user pipx
+py -m pipx ensurepath
+
+# Or via package managers
+# Ubuntu/Debian: sudo apt install pipx
+# macOS: brew install pipx
+# Fedora: sudo dnf install pipx
+```
+
+### Option 2: Automated Setup with Virtual Environment
+
+If you prefer manual venv management or can't use pipx:
 
 **Linux/macOS:**
 ```bash
@@ -43,13 +81,9 @@ cd \path\to\gdb-mcp
 setup-venv.bat
 ```
 
-The script will:
-1. Create a virtual environment in `venv/`
-2. Install all dependencies
-3. Install the package in editable mode
-4. Display the configuration for your MCP client
+The script will create a virtual environment and install all dependencies.
 
-### Option 2: Manual Virtual Environment Setup
+### Option 3: Manual Virtual Environment Setup
 
 ```bash
 # Create virtual environment
@@ -60,21 +94,18 @@ source venv/bin/activate  # Linux/macOS
 # or
 venv\Scripts\activate     # Windows
 
-# Install dependencies
-pip install -r requirements.txt
-
 # Install package in editable mode
 pip install -e .
 ```
 
-### Option 3: Global Installation (Not Recommended)
+### Option 4: Global pip Installation (Not Recommended)
 
 ```bash
 # From the project directory
-pip install -e .
+pip install .
 ```
 
-Note: Global installation may conflict with other Python packages. Virtual environments are recommended.
+Note: Global installation may conflict with other Python packages. Use pipx or virtual environments instead.
 
 ## Configuration
 
@@ -86,9 +117,39 @@ Add this to your Claude Desktop configuration file:
 **Linux**: `~/.config/Claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
-#### Using Virtual Environment (Recommended)
+#### Using pipx (Recommended - Simplest Configuration)
 
-Point to the Python executable in your virtual environment:
+If you installed via `pipx`, use this simple configuration:
+
+```json
+{
+  "mcpServers": {
+    "gdb": {
+      "command": "gdb-mcp-server",
+      "args": [],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+Or even simpler (args and type are optional):
+
+```json
+{
+  "mcpServers": {
+    "gdb": {
+      "command": "gdb-mcp-server"
+    }
+  }
+}
+```
+
+That's it! No paths to worry about - `pipx` makes `gdb-mcp-server` available globally.
+
+#### Using Virtual Environment
+
+If you used the venv setup scripts, point to the Python executable in your virtual environment:
 
 **Linux/macOS:**
 ```json
@@ -114,36 +175,14 @@ Point to the Python executable in your virtual environment:
 }
 ```
 
-#### Using Global Installation
-
-If you installed globally (not recommended):
-
-```json
-{
-  "mcpServers": {
-    "gdb": {
-      "command": "python",
-      "args": ["-m", "gdb_mcp"]
-    }
-  }
-}
-```
-
-Or if you have the script in your PATH:
-
-```json
-{
-  "mcpServers": {
-    "gdb": {
-      "command": "gdb-mcp-server"
-    }
-  }
-}
-```
-
 ### Other MCP Clients
 
 The server uses stdio for communication and can be used with any MCP-compatible client.
+
+**If installed with pipx:**
+```bash
+gdb-mcp-server
+```
 
 **If using virtual environment:**
 ```bash
@@ -151,13 +190,6 @@ The server uses stdio for communication and can be used with any MCP-compatible 
 ./venv/bin/python -m gdb_mcp  # Linux/macOS
 # or
 venv\Scripts\python.exe -m gdb_mcp  # Windows
-```
-
-**If installed globally:**
-```bash
-python -m gdb_mcp
-# or
-gdb-mcp-server
 ```
 
 ## Available Tools
