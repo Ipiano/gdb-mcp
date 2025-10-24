@@ -42,6 +42,32 @@ setup-venv.bat
 
 The script will create a virtual environment and install all dependencies.
 
+### Step 2.5: Verify Installation (Optional but Recommended)
+
+Before configuring Claude Desktop, verify the installation works:
+
+**Test the module can be imported:**
+```bash
+# From any directory
+/absolute/path/to/gdb-mcp/venv/bin/python -c "import gdb_mcp; print('OK')"
+```
+
+**Test the server can start:**
+```bash
+# From any directory (Ctrl+C to stop)
+/absolute/path/to/gdb-mcp/venv/bin/python -m gdb_mcp
+```
+
+You should see: `INFO:gdb_mcp.server:GDB MCP Server starting...`
+
+This confirms:
+- ✓ The virtual environment is set up correctly
+- ✓ All dependencies are installed
+- ✓ The module can be found from any working directory
+- ✓ The server can start successfully
+
+If you see errors, check the Troubleshooting section below.
+
 ### Step 3: Configure Your MCP Client
 
 #### For Claude Desktop
@@ -240,8 +266,20 @@ virtualenv venv
 
 ## Manual Testing
 
-You can test the server manually before configuring Claude Desktop:
+You can test the server manually before configuring Claude Desktop.
 
+**Method 1: Direct path (recommended - same as Claude Desktop uses):**
+```bash
+# From any directory, using absolute path to venv Python
+/absolute/path/to/gdb-mcp/venv/bin/python -m gdb_mcp  # Linux/macOS
+# or
+C:\absolute\path\to\gdb-mcp\venv\Scripts\python.exe -m gdb_mcp  # Windows
+
+# You should see: INFO:gdb_mcp.server:GDB MCP Server starting...
+# Press Ctrl+C to exit
+```
+
+**Method 2: After activating the virtual environment:**
 ```bash
 # Activate virtual environment
 source venv/bin/activate  # Linux/macOS
@@ -254,7 +292,7 @@ python -m gdb_mcp
 # It should start and wait for input (Ctrl+C to exit)
 ```
 
-If this works, the configuration should work in Claude Desktop too.
+**Important:** Method 1 (direct path) is preferred because it's exactly how Claude Desktop will run it. If Method 1 works from any directory, then Claude Desktop will work too.
 
 ---
 
