@@ -80,8 +80,16 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="gdb_execute_command",
             description=(
-                "Execute any GDB command directly. Use this for commands not covered by "
-                "other specialized tools, or for advanced GDB operations."
+                "Execute any GDB command directly. Supports both CLI and MI commands. "
+                "CLI commands (like 'info breakpoints', 'list', 'print x') are automatically "
+                "handled and their output is formatted for readability. "
+                "MI commands (starting with '-', like '-break-list', '-exec-run') return "
+                "structured data. Use this for: "
+                "1) Commands not covered by specialized tools (info, show, set, etc.), "
+                "2) Starting programs ('run', 'start'), "
+                "3) Advanced GDB operations. "
+                "Common examples: 'info breakpoints', 'info threads', 'run', 'print variable', "
+                "'list main', 'disassemble func'."
             ),
             inputSchema=ExecuteCommandArgs.model_json_schema(),
         ),
