@@ -175,8 +175,7 @@ class GDBSession:
                 return {
                     "status": "success",
                     "command": command,
-                    "output": console_output.strip() if console_output else "(no output)",
-                    "raw_result": result  # Keep raw result for debugging
+                    "output": console_output.strip() if console_output else "(no output)"
                 }
             else:
                 # For MI commands, return structured result
