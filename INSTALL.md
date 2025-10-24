@@ -105,6 +105,8 @@ pipx install -e .
 
 This installs the `gdb-mcp-server` command globally, isolated from other Python packages.
 
+**Important:** Wait for `pipx install` to fully complete before proceeding. You'll see output like "installed package gdb-mcp-server" or "done" when finished.
+
 ### Step 4: Verify Installation
 
 ```bash
@@ -118,6 +120,11 @@ gdb-mcp-server  # Press Ctrl+C to stop
 ```
 
 You should see: `INFO:gdb_mcp.server:GDB MCP Server starting...`
+
+**Troubleshooting:** If you get `ModuleNotFoundError: No module named 'mcp.types'` or similar import errors, the installation may not have fully completed. Wait a moment and try again, or run:
+```bash
+pipx reinstall gdb-mcp-server
+```
 
 ### Step 5: Configure Your MCP Client
 
