@@ -165,3 +165,443 @@ class TestGDBSessionWithMock:
         assert result["status"] == "success"
         assert "warnings" in result
         assert any("not compiled with -g" in w for w in result["warnings"])
+
+
+class TestThreadOperations:
+    """Test cases for thread inspection methods."""
+
+    def test_get_threads_no_session(self):
+        """Test get_threads when no session is running."""
+        session = GDBSession()
+        # Manually set controller to None to simulate no session
+        session.controller = None
+
+        result = session.get_threads()
+        assert result["status"] == "error"
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_threads_success(self, mock_controller_class):
+        """Test successful thread retrieval."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        # Mock execute_command to return thread info
+        def mock_execute(cmd, **kwargs):
+            return {
+                "status": "success",
+                "result": {
+                    "result": {
+                        "threads": [
+                            {"id": "1", "name": "main"},
+                            {"id": "2", "name": "worker-1"},
+                        ],
+                        "current-thread-id": "1",
+                    }
+                },
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_threads()
+
+        assert result["status"] == "success"
+        assert result["count"] == 2
+        assert result["current_thread_id"] == "1"
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_backtrace_default(self, mock_controller_class):
+        """Test backtrace with default parameters."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {
+                "status": "success",
+                "result": {"result": {"stack": [{"level": "0", "func": "main", "file": "test.c"}]}},
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_backtrace()
+
+        assert result["status"] == "success"
+        assert result["count"] == 1
+        assert result["thread_id"] is None
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_backtrace_specific_thread(self, mock_controller_class):
+        """Test backtrace for a specific thread."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        commands_executed = []
+
+        def mock_execute(cmd, **kwargs):
+            commands_executed.append(cmd)
+            if "thread-select" in cmd:
+                return {"status": "success"}
+            return {
+                "status": "success",
+                "result": {"result": {"stack": []}},
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_backtrace(thread_id=3)
+
+        assert result["status"] == "success"
+        assert any("thread-select 3" in cmd for cmd in commands_executed)
+
+
+class TestBreakpointOperations:
+    """Test cases for breakpoint management."""
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_set_breakpoint_simple(self, mock_controller_class):
+        """Test setting a simple breakpoint."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {
+                "status": "success",
+                "result": {
+                    "result": {
+                        "bkpt": {
+                            "number": "1",
+                            "type": "breakpoint",
+                            "addr": "0x12345",
+                            "func": "main",
+                        }
+                    }
+                },
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.set_breakpoint("main")
+
+        assert result["status"] == "success"
+        assert "breakpoint" in result
+        assert result["breakpoint"]["func"] == "main"
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_set_breakpoint_with_condition(self, mock_controller_class):
+        """Test setting a conditional breakpoint."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        commands_executed = []
+
+        def mock_execute(cmd, **kwargs):
+            commands_executed.append(cmd)
+            return {
+                "status": "success",
+                "result": {"result": {"bkpt": {"number": "1"}}},
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.set_breakpoint("foo.c:42", condition="x > 10", temporary=True)
+
+        assert result["status"] == "success"
+        # Verify the command includes condition and temporary flags
+        assert any("-break-insert" in cmd for cmd in commands_executed)
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_list_breakpoints(self, mock_controller_class):
+        """Test listing breakpoints."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {
+                "status": "success",
+                "result": {
+                    "result": {
+                        "BreakpointTable": {
+                            "body": [
+                                {"number": "1", "type": "breakpoint"},
+                                {"number": "2", "type": "breakpoint"},
+                            ]
+                        }
+                    }
+                },
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.list_breakpoints()
+
+        assert result["status"] == "success"
+        assert result["count"] == 2
+        assert len(result["breakpoints"]) == 2
+
+
+class TestExecutionControl:
+    """Test cases for execution control methods."""
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_continue_execution(self, mock_controller_class):
+        """Test continue execution."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {"status": "success", "result": {"result": None}}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.continue_execution()
+
+        assert result["status"] == "success"
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_step(self, mock_controller_class):
+        """Test step into."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {"status": "success", "result": {"result": None}}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.step()
+
+        assert result["status"] == "success"
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_next(self, mock_controller_class):
+        """Test step over."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {"status": "success", "result": {"result": None}}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.next()
+
+        assert result["status"] == "success"
+
+    def test_interrupt_no_controller(self):
+        """Test interrupt when no session exists."""
+        session = GDBSession()
+        result = session.interrupt()
+
+        assert result["status"] == "error"
+        assert "No active GDB session" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    @patch("gdb_mcp.gdb_interface.os.kill")
+    @patch("time.sleep")  # time is imported locally in the method
+    def test_interrupt_success(self, mock_sleep, mock_kill, mock_controller_class):
+        """Test successful interrupt."""
+        mock_controller = MagicMock()
+        mock_controller.gdb_process.pid = 12345
+        mock_controller.get_gdb_response.return_value = [
+            {"type": "notify", "payload": {"msg": "stopped"}}
+        ]
+
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        result = session.interrupt()
+
+        assert result["status"] == "success"
+        mock_kill.assert_called_once()
+
+
+class TestDataInspection:
+    """Test cases for data inspection methods."""
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_evaluate_expression(self, mock_controller_class):
+        """Test expression evaluation."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {
+                "status": "success",
+                "result": {"result": {"value": "42"}},
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.evaluate_expression("x + y")
+
+        assert result["status"] == "success"
+        assert result["expression"] == "x + y"
+        assert result["value"] == "42"
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_variables(self, mock_controller_class):
+        """Test getting local variables."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            if "stack-select-frame" in cmd or "thread-select" in cmd:
+                return {"status": "success"}
+            return {
+                "status": "success",
+                "result": {
+                    "result": {
+                        "variables": [
+                            {"name": "x", "value": "10"},
+                            {"name": "y", "value": "20"},
+                        ]
+                    }
+                },
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_variables(thread_id=2, frame=1)
+
+        assert result["status"] == "success"
+        assert result["thread_id"] == 2
+        assert result["frame"] == 1
+        assert len(result["variables"]) == 2
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_registers(self, mock_controller_class):
+        """Test getting register values."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {
+                "status": "success",
+                "result": {
+                    "result": {
+                        "register-values": [
+                            {"number": "0", "value": "0x1234"},
+                            {"number": "1", "value": "0x5678"},
+                        ]
+                    }
+                },
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_registers()
+
+        assert result["status"] == "success"
+        assert len(result["registers"]) == 2
+
+
+class TestSessionManagement:
+    """Test cases for session management operations."""
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_stop_active_session(self, mock_controller_class):
+        """Test stopping an active session."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        result = session.stop()
+
+        assert result["status"] == "success"
+        assert session.controller is None
+        assert session.is_running is False
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_execute_command_cli(self, mock_controller_class):
+        """Test executing a CLI command with active session."""
+        mock_controller = MagicMock()
+        mock_controller.write.return_value = [
+            {"type": "console", "payload": "Thread 1 (main)\n"},
+            {"type": "result", "payload": None},
+        ]
+
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        result = session.execute_command("info threads")
+
+        assert result["status"] == "success"
+        assert "Thread 1" in result["output"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_execute_command_mi(self, mock_controller_class):
+        """Test executing an MI command with active session."""
+        mock_controller = MagicMock()
+        mock_controller.write.return_value = [
+            {"type": "result", "payload": {"threads": []}},
+        ]
+
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        result = session.execute_command("-thread-info")
+
+        assert result["status"] == "success"
+        assert "result" in result
+
+
+class TestErrorHandling:
+    """Test cases for error handling."""
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_start_session_exception(self, mock_controller_class):
+        """Test that start handles exceptions gracefully."""
+        mock_controller_class.side_effect = Exception("GDB not found")
+
+        session = GDBSession()
+        result = session.start(program="/bin/ls")
+
+        assert result["status"] == "error"
+        assert "GDB not found" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_execute_command_exception(self, mock_controller_class):
+        """Test that execute_command handles exceptions."""
+        mock_controller = MagicMock()
+        mock_controller.write.side_effect = Exception("Timeout")
+
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        result = session.execute_command("info threads")
+
+        assert result["status"] == "error"
+        assert "Timeout" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_set_breakpoint_no_result(self, mock_controller_class):
+        """Test set_breakpoint when GDB returns no result."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {"status": "success", "result": {"result": None}}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.set_breakpoint("main")
+
+        assert result["status"] == "error"
+        assert "no result from GDB" in result["message"]
