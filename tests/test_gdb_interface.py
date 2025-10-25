@@ -59,18 +59,18 @@ class TestGDBSession:
         session = GDBSession()
 
         # CLI commands don't start with '-'
-        assert not "info threads".startswith('-')
-        assert not "print x".startswith('-')
+        assert not "info threads".startswith("-")
+        assert not "print x".startswith("-")
 
         # MI commands start with '-'
-        assert "-break-list".startswith('-')
-        assert "-exec-run".startswith('-')
+        assert "-break-list".startswith("-")
+        assert "-exec-run".startswith("-")
 
 
 class TestGDBSessionWithMock:
     """Test cases that mock the GdbController."""
 
-    @patch('gdb_mcp.gdb_interface.GdbController')
+    @patch("gdb_mcp.gdb_interface.GdbController")
     def test_start_session_already_running(self, mock_controller_class):
         """Test starting a session when one is already running."""
         session = GDBSession()
@@ -83,7 +83,7 @@ class TestGDBSessionWithMock:
         assert result["status"] == "error"
         assert "already running" in result["message"].lower()
 
-    @patch('gdb_mcp.gdb_interface.GdbController')
+    @patch("gdb_mcp.gdb_interface.GdbController")
     def test_start_session_basic(self, mock_controller_class):
         """Test basic session start."""
         # Create a mock controller instance
@@ -102,7 +102,7 @@ class TestGDBSessionWithMock:
         assert result["program"] == "/bin/ls"
         assert session.is_running is True
 
-    @patch('gdb_mcp.gdb_interface.GdbController')
+    @patch("gdb_mcp.gdb_interface.GdbController")
     def test_start_session_with_custom_gdb_path(self, mock_controller_class):
         """Test session start with custom GDB path."""
         mock_controller = MagicMock()
@@ -110,10 +110,7 @@ class TestGDBSessionWithMock:
         mock_controller.get_gdb_response.return_value = []
 
         session = GDBSession()
-        result = session.start(
-            program="/bin/ls",
-            gdb_path="/usr/local/bin/gdb-custom"
-        )
+        result = session.start(program="/bin/ls", gdb_path="/usr/local/bin/gdb-custom")
 
         # Verify GdbController was called with correct command
         call_args = mock_controller_class.call_args
@@ -123,7 +120,7 @@ class TestGDBSessionWithMock:
         assert "--interpreter=mi" in command
         assert result["status"] == "success"
 
-    @patch('gdb_mcp.gdb_interface.GdbController')
+    @patch("gdb_mcp.gdb_interface.GdbController")
     def test_start_session_with_env_variables(self, mock_controller_class):
         """Test session start with environment variables."""
         mock_controller = MagicMock()
@@ -150,7 +147,7 @@ class TestGDBSessionWithMock:
         assert any("DEBUG_MODE" in cmd for cmd in env_commands)
         assert any("LOG_LEVEL" in cmd for cmd in env_commands)
 
-    @patch('gdb_mcp.gdb_interface.GdbController')
+    @patch("gdb_mcp.gdb_interface.GdbController")
     def test_start_session_detects_missing_debug_symbols(self, mock_controller_class):
         """Test that missing debug symbols are detected."""
         mock_controller = MagicMock()
@@ -159,7 +156,7 @@ class TestGDBSessionWithMock:
         # Mock response with "no debugging symbols" warning
         mock_controller.get_gdb_response.return_value = [
             {"type": "console", "payload": "Reading symbols from /bin/ls...\n"},
-            {"type": "console", "payload": "(no debugging symbols found)...done.\n"}
+            {"type": "console", "payload": "(no debugging symbols found)...done.\n"},
         ]
 
         session = GDBSession()
