@@ -142,7 +142,7 @@ gdb sample_program
 (gdb) backtrace
 ```
 
-For a complete reference of available GDB commands and tools, see the main [README.md](../README.md#available-tools).
+For a complete reference of all available tools with detailed documentation, see [TOOLS.md](../TOOLS.md).
 
 ## Troubleshooting
 
