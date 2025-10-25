@@ -32,7 +32,7 @@ class TestStartSessionArgs:
             args=["-la", "/tmp"],
             init_commands=["set pagination off"],
             env={"DEBUG": "1"},
-            gdb_path="/usr/local/bin/gdb"
+            gdb_path="/usr/local/bin/gdb",
         )
 
         assert args.program == "/bin/ls"
@@ -43,10 +43,7 @@ class TestStartSessionArgs:
 
     def test_env_dict_validation(self):
         """Test that env accepts dictionary of strings."""
-        args = StartSessionArgs(
-            program="/bin/ls",
-            env={"VAR1": "value1", "VAR2": "value2"}
-        )
+        args = StartSessionArgs(program="/bin/ls", env={"VAR1": "value1", "VAR2": "value2"})
 
         assert args.env == {"VAR1": "value1", "VAR2": "value2"}
 
@@ -104,11 +101,7 @@ class TestSetBreakpointArgs:
 
     def test_conditional_breakpoint(self):
         """Test conditional breakpoint."""
-        args = SetBreakpointArgs(
-            location="foo.c:42",
-            condition="x > 10",
-            temporary=True
-        )
+        args = SetBreakpointArgs(location="foo.c:42", condition="x > 10", temporary=True)
         assert args.location == "foo.c:42"
         assert args.condition == "x > 10"
         assert args.temporary is True

@@ -30,7 +30,7 @@ class GDBSession:
         init_commands: Optional[List[str]] = None,
         env: Optional[Dict[str, str]] = None,
         gdb_path: str = "gdb",
-        time_to_check_for_additional_output_sec: float = 0.2
+        time_to_check_for_additional_output_sec: float = 0.2,
     ) -> Dict[str, Any]:
         """
         Start a new GDB session.
@@ -56,10 +56,7 @@ class GDBSession:
             {"LD_LIBRARY_PATH": "/custom/libs", "DEBUG_MODE": "1"}
         """
         if self.controller:
-            return {
-                "status": "error",
-                "message": "Session already running. Stop it first."
-            }
+            return {"status": "error", "message": "Session already running. Stop it first."}
 
         try:
             # Start GDB in MI mode
@@ -74,7 +71,7 @@ class GDBSession:
             # pygdbmi 0.11+ uses 'command' parameter instead of 'gdb_path' and 'gdb_args'
             self.controller = GdbController(
                 command=gdb_command,
-                time_to_check_for_additional_output_sec=time_to_check_for_additional_output_sec
+                time_to_check_for_additional_output_sec=time_to_check_for_additional_output_sec,
             )
 
             # Get initial responses from GDB startup
@@ -100,7 +97,7 @@ class GDBSession:
                 for var_name, var_value in env.items():
                     # Escape quotes in the value
                     escaped_value = var_value.replace('"', '\\"')
-                    env_cmd = f'set environment {var_name} {escaped_value}'
+                    env_cmd = f"set environment {var_name} {escaped_value}"
                     result = self.execute_command(env_cmd)
                     env_output.append(result)
 
@@ -144,10 +141,7 @@ class GDBSession:
 
         except Exception as e:
             logger.error(f"Failed to start GDB session: {e}")
-            return {
-                "status": "error",
-                "message": f"Failed to start GDB: {str(e)}"
-            }
+            return {"status": "error", "message": f"Failed to start GDB: {str(e)}"}
 
     def execute_command(self, command: str, timeout_sec: int = 5) -> Dict[str, Any]:
         """
@@ -164,15 +158,12 @@ class GDBSession:
             Dict containing the command result and output
         """
         if not self.controller:
-            return {
-                "status": "error",
-                "message": "No active GDB session"
-            }
+            return {"status": "error", "message": "No active GDB session"}
 
         try:
             # Detect if this is a CLI command (doesn't start with '-')
             # CLI commands need to be wrapped with -interpreter-exec
-            is_cli_command = not command.strip().startswith('-')
+            is_cli_command = not command.strip().startswith("-")
             actual_command = command
 
             if is_cli_command:
@@ -195,23 +186,15 @@ class GDBSession:
                 return {
                     "status": "success",
                     "command": command,
-                    "output": console_output.strip() if console_output else "(no output)"
+                    "output": console_output.strip() if console_output else "(no output)",
                 }
             else:
                 # For MI commands, return structured result
-                return {
-                    "status": "success",
-                    "command": command,
-                    "result": result
-                }
+                return {"status": "success", "command": command, "result": result}
 
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
-            return {
-                "status": "error",
-                "command": command,
-                "message": str(e)
-            }
+            return {"status": "error", "command": command, "message": str(e)}
 
     def _parse_responses(self, responses: List[Dict]) -> Dict[str, Any]:
         """Parse GDB/MI responses into a structured format."""
@@ -260,10 +243,12 @@ class GDBSession:
             "status": "success",
             "threads": threads,
             "current_thread_id": current_thread,
-            "count": len(threads)
+            "count": len(threads),
         }
 
-    def get_backtrace(self, thread_id: Optional[int] = None, max_frames: int = 100) -> Dict[str, Any]:
+    def get_backtrace(
+        self, thread_id: Optional[int] = None, max_frames: int = 100
+    ) -> Dict[str, Any]:
         """
         Get the stack backtrace for a specific thread or the current thread.
 
@@ -289,18 +274,10 @@ class GDBSession:
         stack_data = result["result"].get("result", {})
         frames = stack_data.get("stack", [])
 
-        return {
-            "status": "success",
-            "thread_id": thread_id,
-            "frames": frames,
-            "count": len(frames)
-        }
+        return {"status": "success", "thread_id": thread_id, "frames": frames, "count": len(frames)}
 
     def set_breakpoint(
-        self,
-        location: str,
-        condition: Optional[str] = None,
-        temporary: bool = False
+        self, location: str, condition: Optional[str] = None, temporary: bool = False
     ) -> Dict[str, Any]:
         """
         Set a breakpoint at the specified location.
@@ -340,7 +317,7 @@ class GDBSession:
             return {
                 "status": "error",
                 "message": f"Failed to set breakpoint at {location}: no result from GDB",
-                "raw_result": result
+                "raw_result": result,
             }
 
         # The breakpoint data should be in the "bkpt" field
@@ -352,13 +329,10 @@ class GDBSession:
             return {
                 "status": "error",
                 "message": f"Breakpoint set but no info returned for {location}",
-                "raw_result": result
+                "raw_result": result,
             }
 
-        return {
-            "status": "success",
-            "breakpoint": breakpoint
-        }
+        return {"status": "success", "breakpoint": breakpoint}
 
     def list_breakpoints(self) -> Dict[str, Any]:
         """
@@ -390,11 +364,7 @@ class GDBSession:
         bp_table = mi_result.get("BreakpointTable", {})
         breakpoints = bp_table.get("body", [])
 
-        return {
-            "status": "success",
-            "breakpoints": breakpoints,
-            "count": len(breakpoints)
-        }
+        return {"status": "success", "breakpoints": breakpoints, "count": len(breakpoints)}
 
     def continue_execution(self) -> Dict[str, Any]:
         """Continue execution of the program."""
@@ -431,6 +401,7 @@ class GDBSession:
 
             # Give GDB a moment to process the interrupt
             import time
+
             time.sleep(0.1)
 
             # Get the response
@@ -440,14 +411,11 @@ class GDBSession:
             return {
                 "status": "success",
                 "message": "Program interrupted (paused)",
-                "result": result
+                "result": result,
             }
         except Exception as e:
             logger.error(f"Failed to interrupt program: {e}")
-            return {
-                "status": "error",
-                "message": f"Failed to interrupt: {str(e)}"
-            }
+            return {"status": "error", "message": f"Failed to interrupt: {str(e)}"}
 
     def evaluate_expression(self, expression: str) -> Dict[str, Any]:
         """
@@ -466,11 +434,7 @@ class GDBSession:
 
         value = result["result"].get("result", {}).get("value")
 
-        return {
-            "status": "success",
-            "expression": expression,
-            "value": value
-        }
+        return {"status": "success", "expression": expression, "value": value}
 
     def get_variables(self, thread_id: Optional[int] = None, frame: int = 0) -> Dict[str, Any]:
         """
@@ -498,12 +462,7 @@ class GDBSession:
 
         variables = result["result"].get("result", {}).get("variables", [])
 
-        return {
-            "status": "success",
-            "thread_id": thread_id,
-            "frame": frame,
-            "variables": variables
-        }
+        return {"status": "success", "thread_id": thread_id, "frame": frame, "variables": variables}
 
     def get_registers(self) -> Dict[str, Any]:
         """Get register values for current frame."""
@@ -514,10 +473,7 @@ class GDBSession:
 
         registers = result["result"].get("result", {}).get("register-values", [])
 
-        return {
-            "status": "success",
-            "registers": registers
-        }
+        return {"status": "success", "registers": registers}
 
     def stop(self) -> Dict[str, Any]:
         """Stop the GDB session."""
@@ -541,5 +497,5 @@ class GDBSession:
         return {
             "is_running": self.is_running,
             "target_loaded": self.target_loaded,
-            "has_controller": self.controller is not None
+            "has_controller": self.controller is not None,
         }

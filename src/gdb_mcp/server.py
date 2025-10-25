@@ -30,11 +30,11 @@ class StartSessionArgs(BaseModel):
     args: Optional[list[str]] = Field(None, description="Command-line arguments for the program")
     init_commands: Optional[list[str]] = Field(
         None,
-        description="GDB commands to run on startup (e.g., 'core-file /path/to/core', 'set sysroot /path')"
+        description="GDB commands to run on startup (e.g., 'core-file /path/to/core', 'set sysroot /path')",
     )
     env: Optional[dict[str, str]] = Field(
         None,
-        description="Environment variables to set for the debugged program (e.g., {'LD_LIBRARY_PATH': '/custom/libs'})"
+        description="Environment variables to set for the debugged program (e.g., {'LD_LIBRARY_PATH': '/custom/libs'})",
     )
     gdb_path: str = Field("gdb", description="Path to GDB executable (default: 'gdb')")
 
@@ -251,15 +251,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 args=args.args,
                 init_commands=args.init_commands,
                 env=args.env,
-                gdb_path=args.gdb_path
+                gdb_path=args.gdb_path,
             )
 
         elif name == "gdb_execute_command":
             args = ExecuteCommandArgs(**arguments)
-            result = gdb_session.execute_command(
-                command=args.command,
-                timeout_sec=args.timeout_sec
-            )
+            result = gdb_session.execute_command(command=args.command, timeout_sec=args.timeout_sec)
 
         elif name == "gdb_get_status":
             result = gdb_session.get_status()
@@ -269,17 +266,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         elif name == "gdb_get_backtrace":
             args = GetBacktraceArgs(**arguments)
-            result = gdb_session.get_backtrace(
-                thread_id=args.thread_id,
-                max_frames=args.max_frames
-            )
+            result = gdb_session.get_backtrace(thread_id=args.thread_id, max_frames=args.max_frames)
 
         elif name == "gdb_set_breakpoint":
             args = SetBreakpointArgs(**arguments)
             result = gdb_session.set_breakpoint(
-                location=args.location,
-                condition=args.condition,
-                temporary=args.temporary
+                location=args.location, condition=args.condition, temporary=args.temporary
             )
 
         elif name == "gdb_list_breakpoints":
@@ -303,10 +295,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         elif name == "gdb_get_variables":
             args = GetVariablesArgs(**arguments)
-            result = gdb_session.get_variables(
-                thread_id=args.thread_id,
-                frame=args.frame
-            )
+            result = gdb_session.get_variables(thread_id=args.thread_id, frame=args.frame)
 
         elif name == "gdb_get_registers":
             result = gdb_session.get_registers()
@@ -315,13 +304,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = gdb_session.stop()
 
         else:
-            result = {
-                "status": "error",
-                "message": f"Unknown tool: {name}"
-            }
+            result = {"status": "error", "message": f"Unknown tool: {name}"}
 
         # Format result as text
         import json
+
         result_text = json.dumps(result, indent=2)
 
         return [TextContent(type="text", text=result_text)]
@@ -329,11 +316,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     except Exception as e:
         logger.error(f"Error executing tool {name}: {e}", exc_info=True)
         import json
-        error_result = {
-            "status": "error",
-            "message": str(e),
-            "tool": name
-        }
+
+        error_result = {"status": "error", "message": str(e), "tool": name}
         return [TextContent(type="text", text=json.dumps(error_result, indent=2))]
 
 
@@ -343,11 +327,7 @@ async def main():
 
     async with stdio_server() as (read_stream, write_stream):
         logger.info("GDB MCP Server starting...")
-        await app.run(
-            read_stream,
-            write_stream,
-            app.create_initialization_options()
-        )
+        await app.run(read_stream, write_stream, app.create_initialization_options())
 
 
 def run_server():
