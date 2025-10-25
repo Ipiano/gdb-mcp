@@ -26,115 +26,37 @@ This server uses the **GDB/MI (Machine Interface)** protocol, which is the same 
 
 - Python 3.10 or higher
 - GDB installed and available in PATH
-- `pipx` (recommended) - [Installation instructions](https://pipx.pypa.io/stable/installation/)
 
-### Option 1: Using pipx (Recommended)
+### Quick Start
 
-`pipx` installs the package in an isolated environment and makes the command globally available. This is the simplest and cleanest approach.
-
-**For regular users:**
+**Recommended: Using pipx** (simplest, no path management needed):
 ```bash
-# Install from the repository directory
-cd /path/to/gdb-mcp
-pipx install .
-
-# Or install directly from git (future)
-# pipx install git+https://github.com/yourusername/gdb-mcp.git
-```
-
-**For developers (editable mode):**
-```bash
-# Install in editable mode for development
-cd /path/to/gdb-mcp
-pipx install -e .
-```
-
-**Installing pipx** (if not already installed):
-```bash
-# Linux/macOS
+# Install pipx if needed
 python3 -m pip install --user pipx
 python3 -m pipx ensurepath
 
-# Windows
-py -m pip install --user pipx
-py -m pipx ensurepath
-
-# Or via package managers
-# Ubuntu/Debian: sudo apt install pipx
-# macOS: brew install pipx
-# Fedora: sudo dnf install pipx
+# Install gdb-mcp-server
+cd /path/to/gdb-mcp
+pipx install .
 ```
 
-### Option 2: Automated Setup with Virtual Environment
-
-If you prefer manual venv management or can't use pipx:
-
-**Linux/macOS:**
+**Alternative: Using virtual environment**:
 ```bash
 cd /path/to/gdb-mcp
-./setup-venv.sh
-```
-
-**Windows:**
-```cmd
-cd \path\to\gdb-mcp
-setup-venv.bat
-```
-
-The script will create a virtual environment and install all dependencies.
-
-### Option 3: Manual Virtual Environment Setup
-
-```bash
-# Create virtual environment
-python3 -m venv venv
-
-# Activate it
-source venv/bin/activate  # Linux/macOS
+./setup-venv.sh  # Linux/macOS
 # or
-venv\Scripts\activate     # Windows
-
-# Install package in editable mode
-pip install -e .
+setup-venv.bat   # Windows
 ```
 
-### Option 4: Global pip Installation (Not Recommended)
-
-```bash
-# From the project directory
-pip install .
-```
-
-Note: Global installation may conflict with other Python packages. Use pipx or virtual environments instead.
+**For detailed installation instructions, troubleshooting, and other installation methods, see [INSTALL.md](INSTALL.md).**
 
 ## Configuration
 
 ### Claude Desktop
 
-Add this to your Claude Desktop configuration file:
+Add this to your Claude Desktop configuration file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `~/.config/Claude/claude_desktop_config.json` on Linux, or `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Linux**: `~/.config/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-#### Using pipx (Recommended - Simplest Configuration)
-
-If you installed via `pipx`, use this simple configuration:
-
-```json
-{
-  "mcpServers": {
-    "gdb": {
-      "command": "gdb-mcp-server",
-      "args": [],
-      "type": "stdio"
-    }
-  }
-}
-```
-
-Or even simpler (args and type are optional):
-
+**If installed with pipx:**
 ```json
 {
   "mcpServers": {
@@ -145,13 +67,7 @@ Or even simpler (args and type are optional):
 }
 ```
 
-That's it! No paths to worry about - `pipx` makes `gdb-mcp-server` available globally.
-
-#### Using Virtual Environment
-
-If you used the venv setup scripts, point to the Python executable in your virtual environment:
-
-**Linux/macOS:**
+**If using virtual environment:**
 ```json
 {
   "mcpServers": {
@@ -163,34 +79,7 @@ If you used the venv setup scripts, point to the Python executable in your virtu
 }
 ```
 
-**Windows:**
-```json
-{
-  "mcpServers": {
-    "gdb": {
-      "command": "C:\\absolute\\path\\to\\gdb-mcp\\venv\\Scripts\\python.exe",
-      "args": ["-m", "gdb_mcp"]
-    }
-  }
-}
-```
-
-### Other MCP Clients
-
-The server uses stdio for communication and can be used with any MCP-compatible client.
-
-**If installed with pipx:**
-```bash
-gdb-mcp-server
-```
-
-**If using virtual environment:**
-```bash
-# From project directory
-./venv/bin/python -m gdb_mcp  # Linux/macOS
-# or
-venv\Scripts\python.exe -m gdb_mcp  # Windows
-```
+**For detailed configuration examples and other MCP clients, see [INSTALL.md](INSTALL.md#step-5-configure-your-mcp-client).**
 
 ## Available Tools
 
@@ -412,32 +301,7 @@ Get CPU register values for the current frame.
 2. Get threads: `gdb_get_threads`
 3. Report: "There were 8 threads when the program crashed."
 
-### Example 2: Finding Blocked Threads
-
-**User**: "Find all threads that are blocked waiting for a mutex."
-
-**AI Actions**:
-1. Get all threads: `gdb_get_threads`
-2. For each thread:
-   - Get backtrace: `gdb_get_backtrace(thread_id=N)`
-   - Check if backtrace contains mutex/lock functions
-3. Report threads with mutex calls in their stack
-
-### Example 3: Using a GDB Initialization Script
-
-**User**: "I have a GDB script at setup.gdb that configures everything. Use it to start a session, then find the main thread."
-
-**AI Actions**:
-1. Start session:
-```json
-{
-  "init_commands": ["source setup.gdb"]
-}
-```
-2. Get threads and identify main thread
-3. Get backtrace for main thread
-
-### Example 4: Conditional Breakpoint Investigation
+### Example 2: Conditional Breakpoint Investigation
 
 **User**: "Set a breakpoint at process_data but only when the count variable is greater than 100, then continue execution."
 
@@ -452,15 +316,7 @@ Get CPU register values for the current frame.
 2. Continue execution: `gdb_continue`
 3. When hit, inspect state
 
-### Example 5: Analyzing a Running Program (Post-Mortem)
-
-**User**: "The program is in core.dump. I think thread 3 was doing something wrong. Show me its backtrace and all local variables in the top frame."
-
-**AI Actions**:
-1. Start session with core dump
-2. Get backtrace for thread 3: `gdb_get_backtrace(thread_id=3)`
-3. Get variables in top frame: `gdb_get_variables(thread_id=3, frame=0)`
-4. Present analysis
+**For more detailed usage examples and workflows, see [examples/USAGE_GUIDE.md](examples/USAGE_GUIDE.md) and [examples/README.md](examples/README.md).**
 
 ## Advanced Usage
 
@@ -525,56 +381,31 @@ Note: This requires appropriate permissions (usually root or same user).
 
 ## Troubleshooting
 
-### GDB Not Found
-Ensure GDB is installed and in your PATH:
+### Common Issues
+
+**GDB Not Found**
 ```bash
 which gdb
 gdb --version
 ```
 
-### Permission Errors
-When attaching to processes, you may need:
-```bash
-# Linux: Allow ptrace for non-root
-echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
-```
+**Timeout Errors / Commands Not Responding**
 
-### Timeout Errors / Commands Not Responding
+The program is likely still running! When a program is running, GDB is busy and won't respond to other commands.
 
-**Problem:** Commands time out with "Did not get response from gdb after X seconds"
+**Solution:** Use `gdb_interrupt` to pause the running program, then other commands will work.
 
-**Common Cause:** The program is still running! When a program is running (hasn't hit a breakpoint, hasn't finished), GDB is busy and won't respond to other commands.
-
-**Solution:**
-1. Use `gdb_interrupt` to pause the running program
-2. After interrupting, other commands will work again
-3. Check if breakpoints were actually hit (they won't trigger if program exits before reaching them)
-
-**Understanding Program States:**
+**Program States:**
 - **Not started**: Use `gdb_execute_command` with "run" or "start"
 - **Running**: Program is executing - use `gdb_interrupt` to pause it
 - **Paused** (at breakpoint): Use `gdb_continue`, `gdb_step`, `gdb_next`, inspect variables
 - **Finished**: Program has exited - restart with "run" if needed
 
-**For genuinely slow operations,** increase the timeout:
-```json
-{
-  "command": "...",
-  "timeout_sec": 30
-}
-```
+**Missing Debug Symbols**
 
-### Symbol Loading Issues
-Ensure debug symbols are available and paths are correct:
-```json
-{
-  "init_commands": [
-    "set sysroot /correct/path",
-    "set solib-search-path /path/to/libs",
-    "set debug-file-directory /usr/lib/debug"
-  ]
-}
-```
+Always check the `warnings` field in `gdb_start_session` response! Compile your programs with the `-g` flag.
+
+**For detailed troubleshooting, installation issues, and more solutions, see [INSTALL.md](INSTALL.md#troubleshooting).**
 
 ## How It Works
 
