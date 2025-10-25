@@ -29,7 +29,6 @@ This server uses the **GDB/MI (Machine Interface)** protocol, which is the same 
 
 ### Quick Start
 
-**Recommended: Using pipx** (simplest, no path management needed):
 ```bash
 # Install pipx if needed
 python3 -m pip install --user pipx
@@ -40,23 +39,20 @@ cd /path/to/gdb-mcp
 pipx install .
 ```
 
-**Alternative: Using virtual environment**:
-```bash
-cd /path/to/gdb-mcp
-./setup-venv.sh  # Linux/macOS
-# or
-setup-venv.bat   # Windows
-```
-
-**For detailed installation instructions, troubleshooting, and other installation methods, see [INSTALL.md](INSTALL.md).**
+**For alternative installation methods (virtual environment, manual setup), see [INSTALL.md](INSTALL.md).**
 
 ## Configuration
 
 ### Claude Desktop
 
-Add this to your Claude Desktop configuration file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `~/.config/Claude/claude_desktop_config.json` on Linux, or `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
+Add this to your Claude Desktop configuration file:
 
-**If installed with pipx:**
+**Location:**
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+**Configuration:**
 ```json
 {
   "mcpServers": {
@@ -67,19 +63,7 @@ Add this to your Claude Desktop configuration file (`~/Library/Application Suppo
 }
 ```
 
-**If using virtual environment:**
-```json
-{
-  "mcpServers": {
-    "gdb": {
-      "command": "/absolute/path/to/gdb-mcp/venv/bin/python",
-      "args": ["-m", "gdb_mcp"]
-    }
-  }
-}
-```
-
-**For detailed configuration examples and other MCP clients, see [INSTALL.md](INSTALL.md#step-5-configure-your-mcp-client).**
+**For other installation methods and MCP clients, see [INSTALL.md](INSTALL.md#step-5-configure-your-mcp-client).**
 
 ## Available Tools
 
