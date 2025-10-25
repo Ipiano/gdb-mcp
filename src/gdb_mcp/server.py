@@ -32,6 +32,7 @@ class StartSessionArgs(BaseModel):
         None,
         description="GDB commands to run on startup (e.g., 'core-file /path/to/core', 'set sysroot /path')"
     )
+    gdb_path: str = Field("gdb", description="Path to GDB executable (default: 'gdb')")
 
 
 class ExecuteCommandArgs(BaseModel):
@@ -244,7 +245,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = gdb_session.start(
                 program=args.program,
                 args=args.args,
-                init_commands=args.init_commands
+                init_commands=args.init_commands,
+                gdb_path=args.gdb_path
             )
 
         elif name == "gdb_execute_command":
