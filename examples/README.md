@@ -2,6 +2,8 @@
 
 This directory contains example programs and scripts to help you test and understand the GDB MCP Server.
 
+**For detailed step-by-step workflows and usage patterns, see [USAGE_GUIDE.md](USAGE_GUIDE.md).**
+
 ## Files
 
 - `sample_program.c` - A multi-threaded C program with various debugging scenarios
@@ -140,41 +142,7 @@ gdb sample_program
 (gdb) backtrace
 ```
 
-## Common GDB Commands (Reference)
-
-These are commands you might ask the AI to execute via `gdb_execute_command`:
-
-**Thread operations:**
-- `info threads` - List all threads
-- `thread 2` - Switch to thread 2
-- `thread apply all bt` - Backtrace for all threads
-
-**Breakpoints:**
-- `break function_name` - Break at function
-- `break file.c:123` - Break at line
-- `info breakpoints` - List breakpoints
-- `delete 1` - Delete breakpoint 1
-
-**Execution:**
-- `run` - Start program
-- `continue` - Continue execution
-- `next` - Step over
-- `step` - Step into
-- `finish` - Run until function returns
-
-**Inspection:**
-- `print variable` - Print variable value
-- `print *pointer` - Dereference pointer
-- `print array[0]@10` - Print first 10 array elements
-- `info locals` - Show local variables
-- `info args` - Show function arguments
-- `backtrace` - Show call stack
-
-**Advanced:**
-- `set var x = 10` - Set variable value
-- `call function()` - Call a function
-- `x/10x address` - Examine memory
-- `disassemble` - Show assembly code
+For a complete reference of available GDB commands and tools, see the main [README.md](../README.md#available-tools).
 
 ## Troubleshooting
 
