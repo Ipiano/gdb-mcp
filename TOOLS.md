@@ -11,6 +11,7 @@ Start a new GDB debugging session.
 - `program` (optional): Path to executable to debug
 - `args` (optional): Command-line arguments for the program
 - `init_commands` (optional): List of GDB commands to run on startup
+- `gdb_path` (optional): Path to GDB executable (default: "gdb")
 
 **Returns:**
 - `status`: "success" or "error"
@@ -34,6 +35,16 @@ Start a new GDB debugging session.
     "set solib-search-path /path/to/libs"
 ]
 ```
+
+**Example with custom GDB path:**
+```json
+{
+  "program": "/path/to/myprogram",
+  "gdb_path": "/usr/local/bin/gdb-custom"
+}
+```
+
+Use `gdb_path` when you need to use a specific GDB version or when GDB is not in your PATH.
 
 ### `gdb_execute_command`
 Execute any GDB command directly. Supports both CLI and MI commands.
