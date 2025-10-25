@@ -239,7 +239,6 @@ Contributions welcome! Areas for improvement:
 - Additional GDB commands
 - Better error handling
 - Async event notifications
-- Multi-session support
 - Enhanced output formatting
 
 ## License
