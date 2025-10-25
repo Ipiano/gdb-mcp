@@ -404,19 +404,6 @@ Always check the `warnings` field in `gdb_start_session` response! Compile your 
 
 4. **Session Management**: A single GDB session is maintained per server instance, allowing stateful debugging across multiple tool calls.
 
-## Comparison with IDE Debuggers
-
-This server provides similar capabilities to IDE debuggers:
-
-| Feature | VS Code | CLion | GDB MCP Server |
-|---------|---------|-------|----------------|
-| GDB/MI Protocol | ✓ | ✓ | ✓ |
-| Thread Inspection | ✓ | ✓ | ✓ |
-| Breakpoints | ✓ | ✓ | ✓ |
-| Variable Inspection | ✓ | ✓ | ✓ |
-| Core Dump Analysis | ✓ | ✓ | ✓ |
-| AI-Driven Analysis | ✗ | ✗ | ✓ |
-
 ## Contributing
 
 Contributions welcome! Areas for improvement:
