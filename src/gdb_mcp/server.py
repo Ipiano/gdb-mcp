@@ -32,6 +32,10 @@ class StartSessionArgs(BaseModel):
         None,
         description="GDB commands to run on startup (e.g., 'core-file /path/to/core', 'set sysroot /path')"
     )
+    env: Optional[dict[str, str]] = Field(
+        None,
+        description="Environment variables to set for the debugged program (e.g., {'LD_LIBRARY_PATH': '/custom/libs'})"
+    )
     gdb_path: str = Field("gdb", description="Path to GDB executable (default: 'gdb')")
 
 
@@ -246,6 +250,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 program=args.program,
                 args=args.args,
                 init_commands=args.init_commands,
+                env=args.env,
                 gdb_path=args.gdb_path
             )
 

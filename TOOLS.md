@@ -11,6 +11,7 @@ Start a new GDB debugging session.
 - `program` (optional): Path to executable to debug
 - `args` (optional): Command-line arguments for the program
 - `init_commands` (optional): List of GDB commands to run on startup
+- `env` (optional): Environment variables to set for the debugged program (dictionary of name-value pairs)
 - `gdb_path` (optional): Path to GDB executable (default: "gdb")
 
 **Returns:**
@@ -22,6 +23,7 @@ Start a new GDB debugging session.
   - "No debugging symbols found - program was not compiled with -g"
   - "File is not an executable"
   - "Program file not found"
+- `env_output` (optional): Output from setting environment variables if env was provided
 - `init_output` (optional): Output from init_commands if provided
 
 **Important:** Always check the `warnings` field! Missing debug symbols will prevent breakpoints from working and variable inspection from showing useful information.
@@ -45,6 +47,23 @@ Start a new GDB debugging session.
 ```
 
 Use `gdb_path` when you need to use a specific GDB version or when GDB is not in your PATH.
+
+**Example with environment variables:**
+```json
+{
+  "program": "/path/to/myprogram",
+  "env": {
+    "LD_LIBRARY_PATH": "/custom/libs:/opt/libs",
+    "DEBUG_MODE": "1",
+    "LOG_LEVEL": "verbose"
+  }
+}
+```
+
+Environment variables are set for the debugged program before execution. This is useful for:
+- Setting library search paths (LD_LIBRARY_PATH, DYLD_LIBRARY_PATH)
+- Configuring application behavior (DEBUG_MODE, LOG_LEVEL, etc.)
+- Testing with different environment configurations
 
 ### `gdb_execute_command`
 Execute any GDB command directly. Supports both CLI and MI commands.

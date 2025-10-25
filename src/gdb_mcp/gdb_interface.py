@@ -28,6 +28,7 @@ class GDBSession:
         program: Optional[str] = None,
         args: Optional[List[str]] = None,
         init_commands: Optional[List[str]] = None,
+        env: Optional[Dict[str, str]] = None,
         gdb_path: str = "gdb",
         time_to_check_for_additional_output_sec: float = 0.2
     ) -> Dict[str, Any]:
@@ -38,6 +39,7 @@ class GDBSession:
             program: Path to the executable to debug
             args: Command-line arguments for the program
             init_commands: List of GDB commands to run on startup (e.g., loading core dumps)
+            env: Environment variables to set for the debugged program
             gdb_path: Path to GDB executable
             time_to_check_for_additional_output_sec: Time to wait for GDB output
 
@@ -49,6 +51,9 @@ class GDBSession:
              "core-file /path/to/core",
              "set sysroot /path/to/sysroot",
              "set solib-search-path /path/to/libs"]
+
+        Example env:
+            {"LD_LIBRARY_PATH": "/custom/libs", "DEBUG_MODE": "1"}
         """
         if self.controller:
             return {
@@ -88,6 +93,17 @@ class GDBSession:
             if "no such file" in startup_console.lower():
                 warnings.append("Program file not found")
 
+            # Set environment variables for the debugged program if provided
+            # These must be set before the program runs
+            env_output = []
+            if env:
+                for var_name, var_value in env.items():
+                    # Escape quotes in the value
+                    escaped_value = var_value.replace('"', '\\"')
+                    env_cmd = f'set environment {var_name} {escaped_value}'
+                    result = self.execute_command(env_cmd)
+                    env_output.append(result)
+
             # Run initialization commands if provided
             init_output = []
             if init_commands:
@@ -115,6 +131,10 @@ class GDBSession:
             # Include warnings if any detected
             if warnings:
                 result["warnings"] = warnings
+
+            # Include environment setup output if any
+            if env_output:
+                result["env_output"] = env_output
 
             # Include init command output if any
             if init_output:
