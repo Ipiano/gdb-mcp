@@ -96,7 +96,14 @@ class TestGDBSessionWithMock:
         ]
 
         session = GDBSession()
-        result = session.start(program="/bin/ls")
+
+        # Mock execute_command to return success for readiness check
+        with patch.object(session, "execute_command") as mock_execute:
+            mock_execute.return_value = {
+                "status": "success",
+                "result": {"result": {"version": "GNU gdb 9.0"}},
+            }
+            result = session.start(program="/bin/ls")
 
         assert result["status"] == "success"
         assert result["program"] == "/bin/ls"
@@ -110,7 +117,14 @@ class TestGDBSessionWithMock:
         mock_controller.get_gdb_response.return_value = []
 
         session = GDBSession()
-        result = session.start(program="/bin/ls", gdb_path="/usr/local/bin/gdb-custom")
+
+        # Mock execute_command to return success for readiness check
+        with patch.object(session, "execute_command") as mock_execute:
+            mock_execute.return_value = {
+                "status": "success",
+                "result": {"result": {"version": "GNU gdb 9.0"}},
+            }
+            result = session.start(program="/bin/ls", gdb_path="/usr/local/bin/gdb-custom")
 
         # Verify GdbController was called with correct command
         call_args = mock_controller_class.call_args
@@ -160,7 +174,14 @@ class TestGDBSessionWithMock:
         ]
 
         session = GDBSession()
-        result = session.start(program="/bin/ls")
+
+        # Mock execute_command to return success for readiness check
+        with patch.object(session, "execute_command") as mock_execute:
+            mock_execute.return_value = {
+                "status": "success",
+                "result": {"result": {"version": "GNU gdb 9.0"}},
+            }
+            result = session.start(program="/bin/ls")
 
         assert result["status"] == "success"
         assert "warnings" in result
@@ -179,17 +200,28 @@ class TestGDBSessionWithMock:
         timeout_values = []
 
         def mock_execute(cmd, timeout_sec=5, **kwargs):
-            timeout_values.append(timeout_sec)
-            return {"status": "success", "command": cmd, "output": ""}
+            timeout_values.append((cmd, timeout_sec))
+            # Return success for readiness check to exit early
+            return {
+                "status": "success",
+                "command": cmd,
+                "output": "",
+                "result": {"result": {"version": "9.0"}},
+            }
 
         with patch.object(session, "execute_command", side_effect=mock_execute):
             result = session.start(
-                program="/bin/ls", init_commands=["core-file /path/to/core"], init_timeout_sec=60
+                program="/bin/ls",
+                init_commands=["core-file /path/to/core"],
+                init_timeout_sec=60,
             )
 
         # Verify that the init command was called with the custom timeout
-        assert len(timeout_values) == 1
-        assert timeout_values[0] == 60
+        # First call should be the init command with timeout 60
+        assert len(timeout_values) >= 1
+        assert timeout_values[0][0] == "core-file /path/to/core"
+        assert timeout_values[0][1] == 60
+        # There may be additional calls for readiness polling with timeout 2
         assert result["status"] == "success"
 
 

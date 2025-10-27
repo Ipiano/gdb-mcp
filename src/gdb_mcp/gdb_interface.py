@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 from typing import Optional, List, Dict, Any
 from pygdbmi.gdbcontroller import GdbController
 import logging
@@ -33,6 +34,7 @@ class GDBSession:
         gdb_path: str = "gdb",
         time_to_check_for_additional_output_sec: float = 0.2,
         init_timeout_sec: int = 30,
+        ready_timeout_sec: int = 10,
     ) -> Dict[str, Any]:
         """
         Start a new GDB session.
@@ -45,6 +47,7 @@ class GDBSession:
             gdb_path: Path to GDB executable
             time_to_check_for_additional_output_sec: Time to wait for GDB output
             init_timeout_sec: Timeout for initialization commands (default 30s, increase for large core dumps)
+            ready_timeout_sec: Timeout to wait for GDB to be ready after init (default 10s)
 
         Returns:
             Dict with status and any output messages
@@ -119,6 +122,7 @@ class GDBSession:
 
             self.is_running = True
 
+            # Build result dict
             result = {
                 "status": "success",
                 "message": f"GDB session started",
@@ -141,11 +145,69 @@ class GDBSession:
             if init_output:
                 result["init_output"] = init_output
 
+            # Wait for GDB to be fully ready after initialization
+            # This prevents NoneType errors from background symbol loading
+            if self.target_loaded or init_commands:
+                ready_info = self._wait_for_gdb_ready(ready_timeout_sec)
+                if ready_info.get("ready_warnings"):
+                    if "warnings" not in result:
+                        result["warnings"] = []
+                    result["warnings"].extend(ready_info["ready_warnings"])
+
             return result
 
         except Exception as e:
             logger.error(f"Failed to start GDB session: {e}")
             return {"status": "error", "message": f"Failed to start GDB: {str(e)}"}
+
+    def _wait_for_gdb_ready(self, timeout_sec: int) -> Dict[str, Any]:
+        """
+        Wait for GDB to be fully ready after initialization commands.
+
+        This polls GDB with simple queries until it responds correctly, indicating
+        that background work (like symbol loading) has completed.
+
+        Args:
+            timeout_sec: Maximum time to wait for GDB to be ready
+
+        Returns:
+            Dict with ready status and any warnings
+        """
+        start_time = time.time()
+        poll_interval = 0.5
+        ready_warnings = []
+        attempts = 0
+
+        logger.info(f"Waiting for GDB to be ready (timeout: {timeout_sec}s)")
+
+        while (time.time() - start_time) < timeout_sec:
+            attempts += 1
+
+            try:
+                # Try a simple MI command to check if GDB is responsive
+                # Using -gdb-version is safer than -thread-info for processes without threads
+                response = self.execute_command("-gdb-version", timeout_sec=2)
+
+                # Check if we got a valid response
+                if response.get("status") == "success":
+                    result_payload = response.get("result")
+                    if result_payload and result_payload.get("result") is not None:
+                        elapsed = time.time() - start_time
+                        logger.info(f"GDB ready after {elapsed:.1f}s ({attempts} attempts)")
+                        return {"ready": True}
+
+            except Exception as e:
+                logger.debug(f"GDB not ready yet (attempt {attempts}): {e}")
+
+            time.sleep(poll_interval)
+
+        # Timed out waiting for GDB
+        elapsed = time.time() - start_time
+        warning_msg = f"GDB may not be fully ready after {elapsed:.1f}s (timeout reached)"
+        logger.warning(warning_msg)
+        ready_warnings.append(warning_msg)
+
+        return {"ready": False, "ready_warnings": ready_warnings}
 
     def execute_command(self, command: str, timeout_sec: int = 5) -> Dict[str, Any]:
         """
