@@ -67,7 +67,7 @@ Add this to your Claude Desktop configuration file:
 
 ## Available Tools
 
-The GDB MCP Server provides 13 tools for controlling GDB debugging sessions:
+The GDB MCP Server provides 15 tools for controlling GDB debugging sessions:
 
 **Session Management:**
 - `gdb_start_session` - Start a new GDB session with optional initialization
