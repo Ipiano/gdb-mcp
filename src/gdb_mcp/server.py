@@ -48,6 +48,13 @@ class ExecuteCommandArgs(BaseModel):
     timeout_sec: int = Field(5, description="Timeout in seconds")
 
 
+class StopSessionArgs(BaseModel):
+    timeout_sec: int = Field(
+        5,
+        description="Timeout for graceful GDB exit in seconds (default: 5s, GDB will be force-killed if it doesn't exit in time)",
+    )
+
+
 class GetBacktraceArgs(BaseModel):
     thread_id: Optional[int] = Field(None, description="Thread ID (None for current thread)")
     max_frames: int = Field(100, description="Maximum number of frames to retrieve")
@@ -235,11 +242,12 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="gdb_stop_session",
-            description="Stop the current GDB session and clean up resources.",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            description=(
+                "Stop the current GDB session and clean up resources. "
+                "Uses a timeout to prevent hanging - if GDB doesn't exit gracefully, it will be force-killed. "
+                "Session state is always cleaned up, allowing immediate start of a new session."
+            ),
+            inputSchema=StopSessionArgs.model_json_schema(),
         ),
     ]
 
@@ -308,7 +316,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = gdb_session.get_registers()
 
         elif name == "gdb_stop_session":
-            result = gdb_session.stop()
+            args = StopSessionArgs(**arguments)
+            result = gdb_session.stop(timeout_sec=args.timeout_sec)
 
         else:
             result = {"status": "error", "message": f"Unknown tool: {name}"}

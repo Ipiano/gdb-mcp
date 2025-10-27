@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from gdb_mcp.server import (
     StartSessionArgs,
     ExecuteCommandArgs,
+    StopSessionArgs,
     GetBacktraceArgs,
     SetBreakpointArgs,
     EvaluateExpressionArgs,
@@ -68,6 +69,20 @@ class TestExecuteCommandArgs:
     def test_custom_timeout(self):
         """Test custom timeout value."""
         args = ExecuteCommandArgs(command="info threads", timeout_sec=10)
+        assert args.timeout_sec == 10
+
+
+class TestStopSessionArgs:
+    """Test cases for StopSessionArgs model."""
+
+    def test_default_timeout(self):
+        """Test default timeout value."""
+        args = StopSessionArgs()
+        assert args.timeout_sec == 5
+
+    def test_custom_timeout(self):
+        """Test custom timeout value."""
+        args = StopSessionArgs(timeout_sec=10)
         assert args.timeout_sec == 10
 
 

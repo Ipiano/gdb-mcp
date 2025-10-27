@@ -551,6 +551,57 @@ class TestSessionManagement:
         assert session.is_running is False
 
     @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_stop_session_with_hanging_exit(self, mock_controller_class):
+        """Test that stop handles hanging GDB exit by force-killing."""
+        import time
+
+        mock_controller = MagicMock()
+        mock_process = MagicMock()
+        mock_process.poll.return_value = None  # Process is still running
+
+        # Make exit() hang for longer than timeout
+        def hanging_exit():
+            time.sleep(10)  # Longer than the 1 second timeout we'll use
+
+        mock_controller.exit.side_effect = hanging_exit
+        mock_controller.gdb_process = mock_process
+
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        # Use a very short timeout for the test
+        result = session.stop(timeout_sec=1)
+
+        # Should still succeed (force-killed)
+        assert result["status"] == "success"
+        assert "force killed" in result["message"].lower()
+        # State should be cleaned up
+        assert session.controller is None
+        assert session.is_running is False
+        # Process should have been killed
+        mock_process.kill.assert_called_once()
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_stop_session_cleans_up_on_error(self, mock_controller_class):
+        """Test that stop always cleans up state even if exit fails."""
+        mock_controller = MagicMock()
+        mock_controller.exit.side_effect = Exception("Exit failed")
+        mock_controller.gdb_process = None  # No process to kill
+
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        result = session.stop()
+
+        # Should still clean up state
+        assert result["status"] == "success"
+        assert session.controller is None
+        assert session.is_running is False
+        assert session.target_loaded is False
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
     def test_execute_command_cli(self, mock_controller_class):
         """Test executing a CLI command with active session."""
         mock_controller = MagicMock()

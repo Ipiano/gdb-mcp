@@ -3,6 +3,7 @@
 import os
 import signal
 import subprocess
+import threading
 from typing import Optional, List, Dict, Any
 from pygdbmi.gdbcontroller import GdbController
 import logging
@@ -488,22 +489,75 @@ class GDBSession:
 
         return {"status": "success", "registers": registers}
 
-    def stop(self) -> Dict[str, Any]:
-        """Stop the GDB session."""
+    def stop(self, timeout_sec: int = 5) -> Dict[str, Any]:
+        """
+        Stop the GDB session with timeout protection.
+
+        If GDB doesn't exit gracefully within the timeout, the process will be
+        forcibly terminated. The session state is always cleaned up regardless
+        of how GDB exits.
+
+        Args:
+            timeout_sec: Timeout in seconds for graceful exit (default: 5)
+
+        Returns:
+            Dict with status and message
+        """
         if not self.controller:
             return {"status": "error", "message": "No active session"}
 
+        controller = self.controller
+        gdb_process = controller.gdb_process if hasattr(controller, "gdb_process") else None
+        exit_succeeded = False
+        was_killed = False
+
         try:
-            self.controller.exit()
+            # Try graceful exit with timeout
+            def exit_gdb():
+                nonlocal exit_succeeded
+                try:
+                    controller.exit()
+                    exit_succeeded = True
+                except Exception as e:
+                    logger.warning(f"Error during GDB exit: {e}")
+
+            exit_thread = threading.Thread(target=exit_gdb, daemon=True)
+            exit_thread.start()
+            exit_thread.join(timeout=timeout_sec)
+
+            # If thread is still alive, GDB didn't exit - force kill it
+            if exit_thread.is_alive():
+                logger.warning(
+                    f"GDB did not exit within {timeout_sec}s timeout, force killing process"
+                )
+                if gdb_process and gdb_process.poll() is None:
+                    try:
+                        gdb_process.kill()
+                        gdb_process.wait(timeout=2)
+                        was_killed = True
+                    except Exception as e:
+                        logger.error(f"Failed to kill GDB process: {e}")
+
+        except Exception as e:
+            logger.error(f"Failed to stop GDB session: {e}")
+        finally:
+            # Always clean up state regardless of how we exited
             self.controller = None
             self.is_running = False
             self.target_loaded = False
 
+        if exit_succeeded:
             return {"status": "success", "message": "GDB session stopped"}
-
-        except Exception as e:
-            logger.error(f"Failed to stop GDB session: {e}")
-            return {"status": "error", "message": str(e)}
+        elif was_killed:
+            return {
+                "status": "success",
+                "message": f"GDB session stopped (force killed after {timeout_sec}s timeout)",
+            }
+        else:
+            return {
+                "status": "success",
+                "message": "GDB session stopped (cleanup completed, exit status unknown)",
+            }
 
     def get_status(self) -> Dict[str, Any]:
         """Get the current status of the GDB session."""
