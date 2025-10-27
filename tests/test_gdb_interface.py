@@ -166,6 +166,32 @@ class TestGDBSessionWithMock:
         assert "warnings" in result
         assert any("not compiled with -g" in w for w in result["warnings"])
 
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_start_session_with_init_timeout(self, mock_controller_class):
+        """Test that init_timeout_sec is passed to execute_command for init commands."""
+        mock_controller = MagicMock()
+        mock_controller_class.return_value = mock_controller
+        mock_controller.get_gdb_response.return_value = []
+
+        session = GDBSession()
+
+        # Track calls to execute_command
+        timeout_values = []
+
+        def mock_execute(cmd, timeout_sec=5, **kwargs):
+            timeout_values.append(timeout_sec)
+            return {"status": "success", "command": cmd, "output": ""}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.start(
+                program="/bin/ls", init_commands=["core-file /path/to/core"], init_timeout_sec=60
+            )
+
+        # Verify that the init command was called with the custom timeout
+        assert len(timeout_values) == 1
+        assert timeout_values[0] == 60
+        assert result["status"] == "success"
+
 
 class TestThreadOperations:
     """Test cases for thread inspection methods."""
@@ -605,3 +631,103 @@ class TestErrorHandling:
 
         assert result["status"] == "error"
         assert "no result from GDB" in result["message"]
+
+
+class TestNoneResultHandling:
+    """Test cases for handling None results from GDB/MI commands."""
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_backtrace_with_none_result(self, mock_controller_class):
+        """Test that get_backtrace handles None result payload gracefully."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            # Simulate GDB returning None for result (can happen in cross-arch debugging)
+            return {"status": "success", "command": cmd, "result": None}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_backtrace(thread_id=1, max_frames=25)
+
+        assert result["status"] == "success"
+        assert result["frames"] == []
+        assert result["count"] == 0
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_threads_with_none_result(self, mock_controller_class):
+        """Test that get_threads handles None result payload gracefully."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {"status": "success", "command": cmd, "result": None}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_threads()
+
+        assert result["status"] == "success"
+        assert result["threads"] == []
+        assert result["count"] == 0
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_evaluate_expression_with_none_result(self, mock_controller_class):
+        """Test that evaluate_expression handles None result payload gracefully."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {"status": "success", "command": cmd, "result": None}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.evaluate_expression("x + y")
+
+        assert result["status"] == "success"
+        assert result["expression"] == "x + y"
+        assert result["value"] is None
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_variables_with_none_result(self, mock_controller_class):
+        """Test that get_variables handles None result payload gracefully."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        call_count = [0]
+
+        def mock_execute(cmd, **kwargs):
+            call_count[0] += 1
+            # First two calls are thread-select and stack-select-frame
+            # Third call is the actual stack-list-variables
+            if call_count[0] <= 2:
+                return {"status": "success", "command": cmd, "result": {"result": {}}}
+            return {"status": "success", "command": cmd, "result": None}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_variables(thread_id=1, frame=0)
+
+        assert result["status"] == "success"
+        assert result["variables"] == []
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_registers_with_none_result(self, mock_controller_class):
+        """Test that get_registers handles None result payload gracefully."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {"status": "success", "command": cmd, "result": None}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_registers()
+
+        assert result["status"] == "success"
+        assert result["registers"] == []

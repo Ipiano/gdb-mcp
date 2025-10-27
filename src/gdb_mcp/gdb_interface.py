@@ -31,6 +31,7 @@ class GDBSession:
         env: Optional[Dict[str, str]] = None,
         gdb_path: str = "gdb",
         time_to_check_for_additional_output_sec: float = 0.2,
+        init_timeout_sec: int = 30,
     ) -> Dict[str, Any]:
         """
         Start a new GDB session.
@@ -42,6 +43,7 @@ class GDBSession:
             env: Environment variables to set for the debugged program
             gdb_path: Path to GDB executable
             time_to_check_for_additional_output_sec: Time to wait for GDB output
+            init_timeout_sec: Timeout for initialization commands (default 30s, increase for large core dumps)
 
         Returns:
             Dict with status and any output messages
@@ -102,10 +104,11 @@ class GDBSession:
                     env_output.append(result)
 
             # Run initialization commands if provided
+            # Use longer timeout for init commands since operations like loading core dumps can be slow
             init_output = []
             if init_commands:
                 for cmd in init_commands:
-                    result = self.execute_command(cmd)
+                    result = self.execute_command(cmd, timeout_sec=init_timeout_sec)
                     init_output.append(result)
                     if "file" in cmd.lower() or "core-file" in cmd.lower():
                         self.target_loaded = True
@@ -235,7 +238,9 @@ class GDBSession:
             return result
 
         # Extract thread data from result
-        thread_info = result["result"].get("result", {})
+        # Handle case where result payload is None
+        result_payload = result.get("result") or {}
+        thread_info = result_payload.get("result", {})
         threads = thread_info.get("threads", [])
         current_thread = thread_info.get("current-thread-id")
 
@@ -271,7 +276,9 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        stack_data = result["result"].get("result", {})
+        # Handle case where result payload is None (e.g., cross-architecture debugging)
+        result_payload = result.get("result") or {}
+        stack_data = result_payload.get("result", {})
         frames = stack_data.get("stack", [])
 
         return {"status": "success", "thread_id": thread_id, "frames": frames, "count": len(frames)}
@@ -432,7 +439,9 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        value = result["result"].get("result", {}).get("value")
+        # Handle case where result payload is None
+        result_payload = result.get("result") or {}
+        value = result_payload.get("result", {}).get("value")
 
         return {"status": "success", "expression": expression, "value": value}
 
@@ -460,7 +469,9 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        variables = result["result"].get("result", {}).get("variables", [])
+        # Handle case where result payload is None
+        result_payload = result.get("result") or {}
+        variables = result_payload.get("result", {}).get("variables", [])
 
         return {"status": "success", "thread_id": thread_id, "frame": frame, "variables": variables}
 
@@ -471,7 +482,9 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        registers = result["result"].get("result", {}).get("register-values", [])
+        # Handle case where result payload is None
+        result_payload = result.get("result") or {}
+        registers = result_payload.get("result", {}).get("register-values", [])
 
         return {"status": "success", "registers": registers}
 

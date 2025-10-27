@@ -37,6 +37,10 @@ class StartSessionArgs(BaseModel):
         description="Environment variables to set for the debugged program (e.g., {'LD_LIBRARY_PATH': '/custom/libs'})",
     )
     gdb_path: str = Field("gdb", description="Path to GDB executable (default: 'gdb')")
+    init_timeout_sec: int = Field(
+        30,
+        description="Timeout for initialization commands in seconds (default: 30s, increase for large core dumps)",
+    )
 
 
 class ExecuteCommandArgs(BaseModel):
@@ -81,6 +85,8 @@ async def list_tools() -> list[Tool]:
                 "Automatically detects and reports important warnings such as: "
                 "missing debug symbols (not compiled with -g), file not found, or invalid executable. "
                 "Check the 'warnings' field in the response for critical issues that may affect debugging. "
+                "For large core dumps or cross-architecture debugging, increase 'init_timeout_sec' "
+                "(default 30s) to allow time for symbol loading. "
                 "Examples of init_commands: 'core-file /path/to/core', 'set sysroot /path', "
                 "'set solib-search-path /path'"
             ),
@@ -252,6 +258,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 init_commands=args.init_commands,
                 env=args.env,
                 gdb_path=args.gdb_path,
+                init_timeout_sec=args.init_timeout_sec,
             )
 
         elif name == "gdb_execute_command":
