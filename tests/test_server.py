@@ -26,7 +26,6 @@ class TestStartSessionArgs:
         assert args.env is None
         assert args.gdb_path == "gdb"  # Default value
         assert args.init_timeout_sec == 30  # Default value
-        assert args.ready_timeout_sec == 10  # Default value
 
     def test_full_args(self):
         """Test creating StartSessionArgs with all arguments."""
@@ -37,7 +36,6 @@ class TestStartSessionArgs:
             env={"DEBUG": "1"},
             gdb_path="/usr/local/bin/gdb",
             init_timeout_sec=60,
-            ready_timeout_sec=20,
         )
 
         assert args.program == "/bin/ls"
@@ -46,7 +44,6 @@ class TestStartSessionArgs:
         assert args.env == {"DEBUG": "1"}
         assert args.gdb_path == "/usr/local/bin/gdb"
         assert args.init_timeout_sec == 60
-        assert args.ready_timeout_sec == 20
 
     def test_env_dict_validation(self):
         """Test that env accepts dictionary of strings."""

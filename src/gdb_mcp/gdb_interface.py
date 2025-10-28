@@ -34,7 +34,6 @@ class GDBSession:
         gdb_path: str = "gdb",
         time_to_check_for_additional_output_sec: float = 0.2,
         init_timeout_sec: int = 30,
-        ready_timeout_sec: int = 10,
     ) -> Dict[str, Any]:
         """
         Start a new GDB session.
@@ -46,8 +45,7 @@ class GDBSession:
             env: Environment variables to set for the debugged program
             gdb_path: Path to GDB executable
             time_to_check_for_additional_output_sec: Time to wait for GDB output
-            init_timeout_sec: Timeout for initialization commands (default 30s, increase for large core dumps)
-            ready_timeout_sec: Timeout to wait for GDB to be ready after init (default 10s)
+            init_timeout_sec: Timeout for initialization in seconds (default 30s, covers init commands and readiness polling)
 
         Returns:
             Dict with status and any output messages
@@ -148,7 +146,7 @@ class GDBSession:
             # Wait for GDB to be fully ready after initialization
             # This prevents NoneType errors from background symbol loading
             if self.target_loaded or init_commands:
-                ready_info = self._wait_for_gdb_ready(ready_timeout_sec)
+                ready_info = self._wait_for_gdb_ready(init_timeout_sec)
                 if ready_info.get("ready_warnings"):
                     if "warnings" not in result:
                         result["warnings"] = []
