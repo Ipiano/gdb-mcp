@@ -119,6 +119,22 @@ class GDBSession:
                     init_elapsed = time.time() - init_start
                     print(f"[GDB INIT] Init command {i} completed in {init_elapsed:.1f}s, status: {result.get('status')}", flush=True)
                     init_output.append(result)
+
+                    # Check if GDB crashed during this command
+                    if self._check_for_gdb_crash(result):
+                        print(f"[GDB INIT] ✗ FATAL: GDB crashed while executing: {cmd}", flush=True)
+                        logger.error(f"GDB crashed during init command: {cmd}")
+                        # Clean up state
+                        self.controller = None
+                        self.is_running = False
+                        self.target_loaded = False
+                        return {
+                            "status": "error",
+                            "message": f"GDB crashed during initialization while executing: {cmd}",
+                            "error_type": "gdb_crash",
+                            "init_output": init_output,
+                        }
+
                     if "file" in cmd.lower() or "core-file" in cmd.lower():
                         self.target_loaded = True
 
@@ -320,6 +336,39 @@ class GDBSession:
                 parsed["notify"].append(response.get("payload"))
 
         return parsed
+
+    def _check_for_gdb_crash(self, command_result: Dict[str, Any]) -> bool:
+        """
+        Check if a command result indicates GDB has crashed.
+
+        Args:
+            command_result: The result dict from execute_command
+
+        Returns:
+            True if GDB crash detected, False otherwise
+        """
+        # Check for crash indicators in the result
+        if command_result.get("status") != "success":
+            return False
+
+        result_data = command_result.get("result")
+        if not result_data:
+            return False
+
+        # Check log messages for GDB crash indicators
+        log_messages = result_data.get("log", [])
+        crash_indicators = [
+            "A fatal error internal to GDB has been detected",
+            "further debugging is not possible",
+            "GDB will now terminate",
+            "Fatal signal:",
+        ]
+
+        for log_msg in log_messages:
+            if log_msg and any(indicator in log_msg for indicator in crash_indicators):
+                return True
+
+        return False
 
     def get_threads(self) -> Dict[str, Any]:
         """

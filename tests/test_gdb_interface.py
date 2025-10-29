@@ -814,3 +814,112 @@ class TestNoneResultHandling:
 
         assert result["status"] == "success"
         assert result["registers"] == []
+
+
+class TestGDBCrashDetection:
+    """Test cases for detecting GDB crashes during initialization."""
+
+    def test_check_for_gdb_crash_detects_fatal_error(self):
+        """Test that _check_for_gdb_crash detects GDB fatal errors."""
+        session = GDBSession()
+
+        # Simulate a command result with GDB crash messages
+        crash_result = {
+            "status": "success",
+            "result": {
+                "log": [
+                    "Some normal log message\n",
+                    "A fatal error internal to GDB has been detected, further\ndebugging is not possible.\n",
+                    "GDB will now terminate.\n",
+                ]
+            },
+        }
+
+        assert session._check_for_gdb_crash(crash_result) is True
+
+    def test_check_for_gdb_crash_detects_fatal_signal(self):
+        """Test that _check_for_gdb_crash detects GDB fatal signals."""
+        session = GDBSession()
+
+        crash_result = {
+            "status": "success",
+            "result": {
+                "log": [
+                    "Fatal signal: Segmentation fault\n",
+                    "Backtrace unavailable\n",
+                ]
+            },
+        }
+
+        assert session._check_for_gdb_crash(crash_result) is True
+
+    def test_check_for_gdb_crash_no_crash(self):
+        """Test that _check_for_gdb_crash returns False for normal output."""
+        session = GDBSession()
+
+        normal_result = {
+            "status": "success",
+            "result": {
+                "log": [
+                    "Reading symbols from /bin/ls...\n",
+                    "Done.\n",
+                ]
+            },
+        }
+
+        assert session._check_for_gdb_crash(normal_result) is False
+
+    def test_check_for_gdb_crash_error_status(self):
+        """Test that _check_for_gdb_crash returns False for error status."""
+        session = GDBSession()
+
+        error_result = {
+            "status": "error",
+            "message": "Command failed",
+        }
+
+        assert session._check_for_gdb_crash(error_result) is False
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_start_session_detects_gdb_crash(self, mock_controller_class):
+        """Test that start() detects and reports GDB crashes during init commands."""
+        mock_controller = MagicMock()
+        mock_controller_class.return_value = mock_controller
+        mock_controller.get_gdb_response.return_value = []
+
+        session = GDBSession()
+
+        # Mock execute_command to simulate a GDB crash on the second init command
+        call_count = [0]
+
+        def mock_execute(cmd, **kwargs):
+            call_count[0] += 1
+            if "core-file" in cmd:
+                # Simulate GDB crash
+                return {
+                    "status": "success",
+                    "command": cmd,
+                    "result": {
+                        "log": [
+                            "Fatal signal: Segmentation fault\n",
+                            "A fatal error internal to GDB has been detected, further\ndebugging is not possible.\n",
+                        ]
+                    },
+                }
+            return {"status": "success", "command": cmd, "result": {"log": []}}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.start(
+                init_commands=["set sysroot /path", "core-file /path/to/core"],
+                init_timeout_sec=30,
+            )
+
+        # Should detect crash and return error
+        assert result["status"] == "error"
+        assert "crashed" in result["message"].lower()
+        assert "error_type" in result
+        assert result["error_type"] == "gdb_crash"
+        # State should be cleaned up
+        assert session.controller is None
+        assert session.is_running is False
+        assert session.target_loaded is False
