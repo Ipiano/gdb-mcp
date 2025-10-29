@@ -7,6 +7,7 @@ from gdb_mcp.server import (
     StartSessionArgs,
     ExecuteCommandArgs,
     StopSessionArgs,
+    LoadFileArgs,
     GetBacktraceArgs,
     SetBreakpointArgs,
     EvaluateExpressionArgs,
@@ -84,6 +85,30 @@ class TestStopSessionArgs:
         """Test custom timeout value."""
         args = StopSessionArgs(timeout_sec=10)
         assert args.timeout_sec == 10
+
+
+class TestLoadFileArgs:
+    """Test cases for LoadFileArgs model."""
+
+    def test_required_file_path(self):
+        """Test that file_path is required."""
+        with pytest.raises(ValidationError):
+            LoadFileArgs()
+
+    def test_minimal_args(self):
+        """Test minimal arguments with defaults."""
+        args = LoadFileArgs(file_path="/path/to/core")
+        assert args.file_path == "/path/to/core"
+        assert args.file_type == "auto"  # Default
+        assert args.timeout_sec == 60  # Default
+
+    def test_custom_values(self):
+        """Test LoadFileArgs with custom values."""
+        args = LoadFileArgs(file_path="/bin/ls", file_type="executable", timeout_sec=120)
+
+        assert args.file_path == "/bin/ls"
+        assert args.file_type == "executable"
+        assert args.timeout_sec == 120
 
 
 class TestGetBacktraceArgs:

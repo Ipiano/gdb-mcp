@@ -67,10 +67,11 @@ Add this to your Claude Desktop configuration file:
 
 ## Available Tools
 
-The GDB MCP Server provides 13 tools for controlling GDB debugging sessions:
+The GDB MCP Server provides 16 tools for controlling GDB debugging sessions:
 
 **Session Management:**
 - `gdb_start_session` - Start a new GDB session with optional initialization
+- `gdb_load_file` - Load executable, core dump, or symbol file (with readiness polling)
 - `gdb_execute_command` - Execute any GDB command (CLI or MI)
 - `gdb_get_status` - Get current session status
 - `gdb_stop_session` - Stop the current session

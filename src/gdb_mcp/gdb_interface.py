@@ -709,6 +709,103 @@ class GDBSession:
                 "message": "GDB session stopped (cleanup completed, exit status unknown)",
             }
 
+    def load_file(
+        self,
+        file_path: str,
+        file_type: str = "auto",
+        timeout_sec: int = 60,
+    ) -> Dict[str, Any]:
+        """
+        Load a file (executable, core dump, or symbol file) and wait for GDB to be ready.
+
+        This is the preferred method for loading files after session start, as it
+        includes readiness polling to ensure GDB has finished background processing.
+
+        Args:
+            file_path: Path to the file to load
+            file_type: Type of file - "executable", "core", "symbols", or "auto" (default)
+            timeout_sec: Timeout for loading and readiness check (default: 60s)
+
+        Returns:
+            Dict with status and output
+        """
+        if not self.controller:
+            return {"status": "error", "message": "No active GDB session"}
+
+        # Determine the GDB command based on file type
+        if file_type == "auto":
+            # Try to infer from file path or use 'file' command
+            if "core" in file_path.lower():
+                file_type = "core"
+            else:
+                file_type = "executable"
+
+        command_map = {
+            "executable": f"file {file_path}",
+            "core": f"core-file {file_path}",
+            "symbols": f"symbol-file {file_path}",
+        }
+
+        if file_type not in command_map:
+            return {
+                "status": "error",
+                "message": f"Invalid file_type: {file_type}. Must be 'executable', 'core', 'symbols', or 'auto'",
+            }
+
+        command = command_map[file_type]
+        print(f"\n[GDB LOAD FILE] Loading {file_type} file: {file_path}", flush=True)
+        print(f"[GDB LOAD FILE] Using command: {command}", flush=True)
+        print(f"[GDB LOAD FILE] Timeout: {timeout_sec}s", flush=True)
+
+        # Execute the load command
+        load_start = time.time()
+        result = self.execute_command(command, timeout_sec=timeout_sec)
+        load_elapsed = time.time() - load_start
+        print(f"[GDB LOAD FILE] Load command completed in {load_elapsed:.1f}s, status: {result.get('status')}", flush=True)
+
+        if result.get("status") == "error":
+            return result
+
+        # Check if GDB crashed during load
+        if self._check_for_gdb_crash(result):
+            print(f"[GDB LOAD FILE] ✗ FATAL: GDB crashed while loading file", flush=True)
+            logger.error(f"GDB crashed while loading {file_type} file: {file_path}")
+            # Clean up state
+            self.controller = None
+            self.is_running = False
+            self.target_loaded = False
+            return {
+                "status": "error",
+                "message": f"GDB crashed while loading {file_type} file: {file_path}",
+                "error_type": "gdb_crash",
+                "load_output": result,
+            }
+
+        # Mark target as loaded
+        if file_type in ["executable", "core"]:
+            self.target_loaded = True
+
+        # Wait for GDB to be ready after loading
+        print(f"\n[GDB LOAD FILE] Waiting for GDB to be ready after loading {file_type} file...", flush=True)
+        ready_info = self._wait_for_gdb_ready(timeout_sec)
+
+        # Build response
+        response = {
+            "status": "success",
+            "message": f"Loaded {file_type} file: {file_path}",
+            "file_path": file_path,
+            "file_type": file_type,
+            "load_output": result.get("output", result.get("result")),
+        }
+
+        if ready_info.get("ready_warnings"):
+            response["warnings"] = ready_info["ready_warnings"]
+
+        total_elapsed = time.time() - load_start
+        print(f"[GDB LOAD FILE] ✓ File loaded and ready in {total_elapsed:.1f}s", flush=True)
+
+        return response
+
     def get_status(self) -> Dict[str, Any]:
         """Get the current status of the GDB session."""
         return {

@@ -55,6 +55,18 @@ class StopSessionArgs(BaseModel):
     )
 
 
+class LoadFileArgs(BaseModel):
+    file_path: str = Field(..., description="Path to the file to load")
+    file_type: str = Field(
+        "auto",
+        description="Type of file: 'executable', 'core', 'symbols', or 'auto' (default: auto-detect)",
+    )
+    timeout_sec: int = Field(
+        60,
+        description="Timeout for loading and readiness check in seconds (default: 60s)",
+    )
+
+
 class GetBacktraceArgs(BaseModel):
     thread_id: Optional[int] = Field(None, description="Thread ID (None for current thread)")
     max_frames: int = Field(100, description="Maximum number of frames to retrieve")
@@ -250,6 +262,22 @@ async def list_tools() -> list[Tool]:
             ),
             inputSchema=StopSessionArgs.model_json_schema(),
         ),
+        Tool(
+            name="gdb_load_file",
+            description=(
+                "Load a file (executable, core dump, or symbol file) and wait for GDB to be ready. "
+                "This is the PREFERRED way to load core dumps or executables after starting a session, "
+                "as it includes automatic readiness polling to ensure GDB has finished all background "
+                "symbol loading and processing before returning. "
+                "Detects GDB crashes during loading and returns a clear error. "
+                "For large core dumps or cross-architecture debugging, increase timeout_sec (default 60s). "
+                "File types: 'executable' (loads binary), 'core' (loads core dump), "
+                "'symbols' (loads symbol file), 'auto' (auto-detect from filename). "
+                "Use this instead of 'gdb_execute_command' with 'core-file' or 'file' commands "
+                "to avoid NoneType errors and timeouts."
+            ),
+            inputSchema=LoadFileArgs.model_json_schema(),
+        ),
     ]
 
 
@@ -319,6 +347,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         elif name == "gdb_stop_session":
             args = StopSessionArgs(**arguments)
             result = gdb_session.stop(timeout_sec=args.timeout_sec)
+
+        elif name == "gdb_load_file":
+            args = LoadFileArgs(**arguments)
+            result = gdb_session.load_file(
+                file_path=args.file_path,
+                file_type=args.file_type,
+                timeout_sec=args.timeout_sec,
+            )
 
         else:
             result = {"status": "error", "message": f"Unknown tool: {name}"}

@@ -816,6 +816,113 @@ class TestNoneResultHandling:
         assert result["registers"] == []
 
 
+class TestLoadFile:
+    """Test cases for load_file functionality."""
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_load_file_no_session(self, mock_controller_class):
+        """Test load_file when no session is active."""
+        session = GDBSession()
+        result = session.load_file("/path/to/core")
+
+        assert result["status"] == "error"
+        assert "No active GDB session" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_load_file_auto_detect_core(self, mock_controller_class):
+        """Test load_file auto-detects core files."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            if cmd == "core-file /path/to/core":
+                return {"status": "success", "output": "Core loaded", "result": {"log": []}}
+            elif cmd == "-thread-info":
+                return {
+                    "status": "success",
+                    "result": {"result": {"threads": [{"id": "1"}]}},
+                }
+            return {"status": "success", "result": {"log": []}}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.load_file("/path/to/core", file_type="auto", timeout_sec=30)
+
+        assert result["status"] == "success"
+        assert result["file_type"] == "core"
+        assert session.target_loaded is True
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_load_file_executable(self, mock_controller_class):
+        """Test load_file with explicit executable type."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            if cmd == "file /bin/ls":
+                return {"status": "success", "output": "Reading symbols...", "result": {"log": []}}
+            elif cmd == "-thread-info":
+                return {
+                    "status": "success",
+                    "result": {"result": {"threads": []}},
+                }
+            return {"status": "success", "result": {"log": []}}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.load_file("/bin/ls", file_type="executable", timeout_sec=30)
+
+        assert result["status"] == "success"
+        assert result["file_type"] == "executable"
+        assert session.target_loaded is True
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_load_file_detects_crash(self, mock_controller_class):
+        """Test load_file detects GDB crash."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            if "core-file" in cmd:
+                return {
+                    "status": "success",
+                    "result": {
+                        "log": [
+                            "Fatal signal: Segmentation fault\n",
+                            "A fatal error internal to GDB has been detected\n",
+                        ]
+                    },
+                }
+            return {"status": "success", "result": {"log": []}}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.load_file("/path/to/bad_core", file_type="core")
+
+        assert result["status"] == "error"
+        assert "crashed" in result["message"].lower()
+        assert result["error_type"] == "gdb_crash"
+        assert session.controller is None
+        assert session.is_running is False
+        assert session.target_loaded is False
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_load_file_invalid_type(self, mock_controller_class):
+        """Test load_file with invalid file type."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        result = session.load_file("/path/to/file", file_type="invalid")
+
+        assert result["status"] == "error"
+        assert "Invalid file_type" in result["message"]
+
+
 class TestGDBCrashDetection:
     """Test cases for detecting GDB crashes during initialization."""
 
