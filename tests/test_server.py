@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from gdb_mcp.server import (
     StartSessionArgs,
     ExecuteCommandArgs,
+    StopSessionArgs,
     GetBacktraceArgs,
     SetBreakpointArgs,
     EvaluateExpressionArgs,
@@ -24,6 +25,7 @@ class TestStartSessionArgs:
         assert args.init_commands is None
         assert args.env is None
         assert args.gdb_path == "gdb"  # Default value
+        assert args.init_timeout_sec == 30  # Default value
 
     def test_full_args(self):
         """Test creating StartSessionArgs with all arguments."""
@@ -33,6 +35,7 @@ class TestStartSessionArgs:
             init_commands=["set pagination off"],
             env={"DEBUG": "1"},
             gdb_path="/usr/local/bin/gdb",
+            init_timeout_sec=60,
         )
 
         assert args.program == "/bin/ls"
@@ -40,6 +43,7 @@ class TestStartSessionArgs:
         assert args.init_commands == ["set pagination off"]
         assert args.env == {"DEBUG": "1"}
         assert args.gdb_path == "/usr/local/bin/gdb"
+        assert args.init_timeout_sec == 60
 
     def test_env_dict_validation(self):
         """Test that env accepts dictionary of strings."""
@@ -65,6 +69,20 @@ class TestExecuteCommandArgs:
     def test_custom_timeout(self):
         """Test custom timeout value."""
         args = ExecuteCommandArgs(command="info threads", timeout_sec=10)
+        assert args.timeout_sec == 10
+
+
+class TestStopSessionArgs:
+    """Test cases for StopSessionArgs model."""
+
+    def test_default_timeout(self):
+        """Test default timeout value."""
+        args = StopSessionArgs()
+        assert args.timeout_sec == 5
+
+    def test_custom_timeout(self):
+        """Test custom timeout value."""
+        args = StopSessionArgs(timeout_sec=10)
         assert args.timeout_sec == 10
 
 

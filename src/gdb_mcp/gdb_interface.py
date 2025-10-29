@@ -3,6 +3,8 @@
 import os
 import signal
 import subprocess
+import threading
+import time
 from typing import Optional, List, Dict, Any
 from pygdbmi.gdbcontroller import GdbController
 import logging
@@ -31,6 +33,7 @@ class GDBSession:
         env: Optional[Dict[str, str]] = None,
         gdb_path: str = "gdb",
         time_to_check_for_additional_output_sec: float = 0.2,
+        init_timeout_sec: int = 30,
     ) -> Dict[str, Any]:
         """
         Start a new GDB session.
@@ -42,6 +45,7 @@ class GDBSession:
             env: Environment variables to set for the debugged program
             gdb_path: Path to GDB executable
             time_to_check_for_additional_output_sec: Time to wait for GDB output
+            init_timeout_sec: Timeout for initialization in seconds (default 30s, covers init commands and readiness polling)
 
         Returns:
             Dict with status and any output messages
@@ -59,6 +63,8 @@ class GDBSession:
             return {"status": "error", "message": "Session already running. Stop it first."}
 
         try:
+            session_start_time = time.time()
+            print(f"\n[GDB SESSION] Starting GDB session...", flush=True)
             # Start GDB in MI mode
             # Build command list: [gdb_path, --quiet, --interpreter=mi, ...]
             # --quiet suppresses the copyright/license banner
@@ -102,11 +108,33 @@ class GDBSession:
                     env_output.append(result)
 
             # Run initialization commands if provided
+            # Use longer timeout for init commands since operations like loading core dumps can be slow
             init_output = []
             if init_commands:
-                for cmd in init_commands:
-                    result = self.execute_command(cmd)
+                print(f"\n[GDB INIT] Running {len(init_commands)} init command(s) with timeout={init_timeout_sec}s", flush=True)
+                for i, cmd in enumerate(init_commands, 1):
+                    init_start = time.time()
+                    print(f"[GDB INIT] Executing init command {i}/{len(init_commands)}: {cmd}", flush=True)
+                    result = self.execute_command(cmd, timeout_sec=init_timeout_sec)
+                    init_elapsed = time.time() - init_start
+                    print(f"[GDB INIT] Init command {i} completed in {init_elapsed:.1f}s, status: {result.get('status')}", flush=True)
                     init_output.append(result)
+
+                    # Check if GDB crashed during this command
+                    if self._check_for_gdb_crash(result):
+                        print(f"[GDB INIT] ✗ FATAL: GDB crashed while executing: {cmd}", flush=True)
+                        logger.error(f"GDB crashed during init command: {cmd}")
+                        # Clean up state
+                        self.controller = None
+                        self.is_running = False
+                        self.target_loaded = False
+                        return {
+                            "status": "error",
+                            "message": f"GDB crashed during initialization while executing: {cmd}",
+                            "error_type": "gdb_crash",
+                            "init_output": init_output,
+                        }
+
                     if "file" in cmd.lower() or "core-file" in cmd.lower():
                         self.target_loaded = True
 
@@ -115,6 +143,7 @@ class GDBSession:
 
             self.is_running = True
 
+            # Build result dict
             result = {
                 "status": "success",
                 "message": f"GDB session started",
@@ -137,11 +166,96 @@ class GDBSession:
             if init_output:
                 result["init_output"] = init_output
 
+            # Wait for GDB to be fully ready after initialization
+            # This prevents NoneType errors from background symbol loading
+            if self.target_loaded or init_commands:
+                print(f"\n[GDB SESSION] Waiting for GDB to be ready after initialization...", flush=True)
+                ready_info = self._wait_for_gdb_ready(init_timeout_sec)
+                if ready_info.get("ready_warnings"):
+                    if "warnings" not in result:
+                        result["warnings"] = []
+                    result["warnings"].extend(ready_info["ready_warnings"])
+
+            total_elapsed = time.time() - session_start_time
+            print(f"[GDB SESSION] ✓ Session started successfully in {total_elapsed:.1f}s", flush=True)
+
             return result
 
         except Exception as e:
             logger.error(f"Failed to start GDB session: {e}")
             return {"status": "error", "message": f"Failed to start GDB: {str(e)}"}
+
+    def _wait_for_gdb_ready(self, timeout_sec: int) -> Dict[str, Any]:
+        """
+        Wait for GDB to be fully ready after initialization commands.
+
+        This polls GDB with simple queries until it responds correctly, indicating
+        that background work (like symbol loading) has completed.
+
+        Args:
+            timeout_sec: Maximum time to wait for GDB to be ready
+
+        Returns:
+            Dict with ready status and any warnings
+        """
+        start_time = time.time()
+        poll_interval = 0.5
+        ready_warnings = []
+        attempts = 0
+
+        print(f"\n[GDB READINESS] Waiting for GDB to be ready (timeout: {timeout_sec}s)", flush=True)
+        logger.info(f"Waiting for GDB to be ready (timeout: {timeout_sec}s)")
+
+        while (time.time() - start_time) < timeout_sec:
+            attempts += 1
+            elapsed = time.time() - start_time
+            remaining = timeout_sec - elapsed
+            print(f"[GDB READINESS] === Polling attempt {attempts} at {elapsed:.1f}s (timeout in {remaining:.1f}s) ===", flush=True)
+
+            try:
+                # Query the loaded program's thread info to verify the target is fully loaded
+                # This checks if the program/core is ready, not just if GDB is responsive
+                print(f"[GDB READINESS] Sending -thread-info command to check target readiness...", flush=True)
+                cmd_start = time.time()
+                response = self.execute_command("-thread-info", timeout_sec=2)
+                cmd_elapsed = time.time() - cmd_start
+                print(f"[GDB READINESS] Command returned after {cmd_elapsed:.1f}s, status={response.get('status')}", flush=True)
+
+                # Check if we got a valid response about the target
+                if response.get("status") == "success":
+                    result_payload = response.get("result")
+                    if result_payload and result_payload.get("result") is not None:
+                        # Check if we actually got thread information back
+                        thread_data = result_payload.get("result", {})
+                        threads = thread_data.get("threads")
+                        if threads is not None:  # Can be empty list for single-threaded
+                            elapsed = time.time() - start_time
+                            print(f"[GDB READINESS] ✓ Target is ready! Got {len(threads) if isinstance(threads, list) else 'thread'} thread(s) after {elapsed:.1f}s, {attempts} attempts", flush=True)
+                            logger.info(f"GDB ready after {elapsed:.1f}s ({attempts} attempts)")
+                            return {"ready": True}
+                        else:
+                            print(f"[GDB READINESS] ✗ Response success but no thread data yet: {result_payload}", flush=True)
+                    else:
+                        print(f"[GDB READINESS] ✗ Response success but result payload empty: {result_payload}", flush=True)
+                else:
+                    print(f"[GDB READINESS] ✗ Response status not success: {response.get('status')}, message: {response.get('message', 'N/A')}", flush=True)
+
+            except Exception as e:
+                cmd_elapsed = time.time() - cmd_start if 'cmd_start' in locals() else 0
+                print(f"[GDB READINESS] ✗ Exception after {cmd_elapsed:.1f}s: {type(e).__name__}: {e}", flush=True)
+                logger.debug(f"GDB not ready yet (attempt {attempts}): {e}")
+
+            print(f"[GDB READINESS] Sleeping {poll_interval}s before next attempt...", flush=True)
+            time.sleep(poll_interval)
+
+        # Timed out waiting for GDB
+        elapsed = time.time() - start_time
+        warning_msg = f"GDB may not be fully ready after {elapsed:.1f}s ({attempts} attempts, timeout reached)"
+        print(f"[GDB READINESS] ✗ TIMEOUT: {warning_msg}", flush=True)
+        logger.warning(warning_msg)
+        ready_warnings.append(warning_msg)
+
+        return {"ready": False, "ready_warnings": ready_warnings}
 
     def execute_command(self, command: str, timeout_sec: int = 5) -> Dict[str, Any]:
         """
@@ -174,6 +288,13 @@ class GDBSession:
 
             # Send command and get response
             responses = self.controller.write(actual_command, timeout_sec=timeout_sec)
+
+            # TEMPORARY DEBUG: Print all raw GDB responses
+            print(f"\n[GDB DEBUG] Command: {command}")
+            print(f"[GDB DEBUG] Raw responses ({len(responses)} items):")
+            for i, resp in enumerate(responses):
+                print(f"[GDB DEBUG]   [{i}] {resp}")
+            print("[GDB DEBUG] ---")
 
             # Parse responses
             result = self._parse_responses(responses)
@@ -222,6 +343,39 @@ class GDBSession:
 
         return parsed
 
+    def _check_for_gdb_crash(self, command_result: Dict[str, Any]) -> bool:
+        """
+        Check if a command result indicates GDB has crashed.
+
+        Args:
+            command_result: The result dict from execute_command
+
+        Returns:
+            True if GDB crash detected, False otherwise
+        """
+        # Check for crash indicators in the result
+        if command_result.get("status") != "success":
+            return False
+
+        result_data = command_result.get("result")
+        if not result_data:
+            return False
+
+        # Check log messages for GDB crash indicators
+        log_messages = result_data.get("log", [])
+        crash_indicators = [
+            "A fatal error internal to GDB has been detected",
+            "further debugging is not possible",
+            "GDB will now terminate",
+            "Fatal signal:",
+        ]
+
+        for log_msg in log_messages:
+            if log_msg and any(indicator in log_msg for indicator in crash_indicators):
+                return True
+
+        return False
+
     def get_threads(self) -> Dict[str, Any]:
         """
         Get information about all threads in the debugged process.
@@ -235,7 +389,9 @@ class GDBSession:
             return result
 
         # Extract thread data from result
-        thread_info = result["result"].get("result", {})
+        # Handle case where result payload is None
+        result_payload = result.get("result") or {}
+        thread_info = result_payload.get("result", {})
         threads = thread_info.get("threads", [])
         current_thread = thread_info.get("current-thread-id")
 
@@ -271,7 +427,9 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        stack_data = result["result"].get("result", {})
+        # Handle case where result payload is None (e.g., cross-architecture debugging)
+        result_payload = result.get("result") or {}
+        stack_data = result_payload.get("result", {})
         frames = stack_data.get("stack", [])
 
         return {"status": "success", "thread_id": thread_id, "frames": frames, "count": len(frames)}
@@ -432,7 +590,9 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        value = result["result"].get("result", {}).get("value")
+        # Handle case where result payload is None
+        result_payload = result.get("result") or {}
+        value = result_payload.get("result", {}).get("value")
 
         return {"status": "success", "expression": expression, "value": value}
 
@@ -460,7 +620,9 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        variables = result["result"].get("result", {}).get("variables", [])
+        # Handle case where result payload is None
+        result_payload = result.get("result") or {}
+        variables = result_payload.get("result", {}).get("variables", [])
 
         return {"status": "success", "thread_id": thread_id, "frame": frame, "variables": variables}
 
@@ -471,26 +633,81 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        registers = result["result"].get("result", {}).get("register-values", [])
+        # Handle case where result payload is None
+        result_payload = result.get("result") or {}
+        registers = result_payload.get("result", {}).get("register-values", [])
 
         return {"status": "success", "registers": registers}
 
-    def stop(self) -> Dict[str, Any]:
-        """Stop the GDB session."""
+    def stop(self, timeout_sec: int = 5) -> Dict[str, Any]:
+        """
+        Stop the GDB session with timeout protection.
+
+        If GDB doesn't exit gracefully within the timeout, the process will be
+        forcibly terminated. The session state is always cleaned up regardless
+        of how GDB exits.
+
+        Args:
+            timeout_sec: Timeout in seconds for graceful exit (default: 5)
+
+        Returns:
+            Dict with status and message
+        """
         if not self.controller:
             return {"status": "error", "message": "No active session"}
 
+        controller = self.controller
+        gdb_process = controller.gdb_process if hasattr(controller, "gdb_process") else None
+        exit_succeeded = False
+        was_killed = False
+
         try:
-            self.controller.exit()
+            # Try graceful exit with timeout
+            def exit_gdb():
+                nonlocal exit_succeeded
+                try:
+                    controller.exit()
+                    exit_succeeded = True
+                except Exception as e:
+                    logger.warning(f"Error during GDB exit: {e}")
+
+            exit_thread = threading.Thread(target=exit_gdb, daemon=True)
+            exit_thread.start()
+            exit_thread.join(timeout=timeout_sec)
+
+            # If thread is still alive, GDB didn't exit - force kill it
+            if exit_thread.is_alive():
+                logger.warning(
+                    f"GDB did not exit within {timeout_sec}s timeout, force killing process"
+                )
+                if gdb_process and gdb_process.poll() is None:
+                    try:
+                        gdb_process.kill()
+                        gdb_process.wait(timeout=2)
+                        was_killed = True
+                    except Exception as e:
+                        logger.error(f"Failed to kill GDB process: {e}")
+
+        except Exception as e:
+            logger.error(f"Failed to stop GDB session: {e}")
+        finally:
+            # Always clean up state regardless of how we exited
             self.controller = None
             self.is_running = False
             self.target_loaded = False
 
+        if exit_succeeded:
             return {"status": "success", "message": "GDB session stopped"}
-
-        except Exception as e:
-            logger.error(f"Failed to stop GDB session: {e}")
-            return {"status": "error", "message": str(e)}
+        elif was_killed:
+            return {
+                "status": "success",
+                "message": f"GDB session stopped (force killed after {timeout_sec}s timeout)",
+            }
+        else:
+            return {
+                "status": "success",
+                "message": "GDB session stopped (cleanup completed, exit status unknown)",
+            }
 
     def get_status(self) -> Dict[str, Any]:
         """Get the current status of the GDB session."""

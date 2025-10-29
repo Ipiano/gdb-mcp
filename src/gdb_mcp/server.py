@@ -37,11 +37,22 @@ class StartSessionArgs(BaseModel):
         description="Environment variables to set for the debugged program (e.g., {'LD_LIBRARY_PATH': '/custom/libs'})",
     )
     gdb_path: str = Field("gdb", description="Path to GDB executable (default: 'gdb')")
+    init_timeout_sec: int = Field(
+        30,
+        description="Timeout for initialization in seconds (default: 30s, covers init commands and readiness polling)",
+    )
 
 
 class ExecuteCommandArgs(BaseModel):
     command: str = Field(..., description="GDB command to execute")
     timeout_sec: int = Field(5, description="Timeout in seconds")
+
+
+class StopSessionArgs(BaseModel):
+    timeout_sec: int = Field(
+        5,
+        description="Timeout for graceful GDB exit in seconds (default: 5s, GDB will be force-killed if it doesn't exit in time)",
+    )
 
 
 class GetBacktraceArgs(BaseModel):
@@ -78,9 +89,12 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Start a new GDB debugging session. Can load an executable, core dump, "
                 "or run custom initialization commands. "
+                "The session waits for GDB to be fully ready before returning, preventing NoneType errors. "
                 "Automatically detects and reports important warnings such as: "
                 "missing debug symbols (not compiled with -g), file not found, or invalid executable. "
                 "Check the 'warnings' field in the response for critical issues that may affect debugging. "
+                "For large core dumps or cross-architecture debugging, increase 'init_timeout_sec' "
+                "(default 30s) to allow time for symbol loading and readiness. "
                 "Examples of init_commands: 'core-file /path/to/core', 'set sysroot /path', "
                 "'set solib-search-path /path'"
             ),
@@ -229,11 +243,12 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="gdb_stop_session",
-            description="Stop the current GDB session and clean up resources.",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            description=(
+                "Stop the current GDB session and clean up resources. "
+                "Uses a timeout to prevent hanging - if GDB doesn't exit gracefully, it will be force-killed. "
+                "Session state is always cleaned up, allowing immediate start of a new session."
+            ),
+            inputSchema=StopSessionArgs.model_json_schema(),
         ),
     ]
 
@@ -252,6 +267,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 init_commands=args.init_commands,
                 env=args.env,
                 gdb_path=args.gdb_path,
+                init_timeout_sec=args.init_timeout_sec,
             )
 
         elif name == "gdb_execute_command":
@@ -301,7 +317,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = gdb_session.get_registers()
 
         elif name == "gdb_stop_session":
-            result = gdb_session.stop()
+            args = StopSessionArgs(**arguments)
+            result = gdb_session.stop(timeout_sec=args.timeout_sec)
 
         else:
             result = {"status": "error", "message": f"Unknown tool: {name}"}

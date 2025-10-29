@@ -96,7 +96,14 @@ class TestGDBSessionWithMock:
         ]
 
         session = GDBSession()
-        result = session.start(program="/bin/ls")
+
+        # Mock execute_command to return success for readiness check (-thread-info)
+        with patch.object(session, "execute_command") as mock_execute:
+            mock_execute.return_value = {
+                "status": "success",
+                "result": {"result": {"threads": [{"id": "1"}]}},
+            }
+            result = session.start(program="/bin/ls")
 
         assert result["status"] == "success"
         assert result["program"] == "/bin/ls"
@@ -110,7 +117,14 @@ class TestGDBSessionWithMock:
         mock_controller.get_gdb_response.return_value = []
 
         session = GDBSession()
-        result = session.start(program="/bin/ls", gdb_path="/usr/local/bin/gdb-custom")
+
+        # Mock execute_command to return success for readiness check (-thread-info)
+        with patch.object(session, "execute_command") as mock_execute:
+            mock_execute.return_value = {
+                "status": "success",
+                "result": {"result": {"threads": [{"id": "1"}]}},
+            }
+            result = session.start(program="/bin/ls", gdb_path="/usr/local/bin/gdb-custom")
 
         # Verify GdbController was called with correct command
         call_args = mock_controller_class.call_args
@@ -160,11 +174,55 @@ class TestGDBSessionWithMock:
         ]
 
         session = GDBSession()
-        result = session.start(program="/bin/ls")
+
+        # Mock execute_command to return success for readiness check (-thread-info)
+        with patch.object(session, "execute_command") as mock_execute:
+            mock_execute.return_value = {
+                "status": "success",
+                "result": {"result": {"threads": [{"id": "1"}]}},
+            }
+            result = session.start(program="/bin/ls")
 
         assert result["status"] == "success"
         assert "warnings" in result
         assert any("not compiled with -g" in w for w in result["warnings"])
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_start_session_with_init_timeout(self, mock_controller_class):
+        """Test that init_timeout_sec is passed to execute_command for init commands."""
+        mock_controller = MagicMock()
+        mock_controller_class.return_value = mock_controller
+        mock_controller.get_gdb_response.return_value = []
+
+        session = GDBSession()
+
+        # Track calls to execute_command
+        timeout_values = []
+
+        def mock_execute(cmd, timeout_sec=5, **kwargs):
+            timeout_values.append((cmd, timeout_sec))
+            # Return success for readiness check to exit early
+            return {
+                "status": "success",
+                "command": cmd,
+                "output": "",
+                "result": {"result": {"version": "9.0"}},
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.start(
+                program="/bin/ls",
+                init_commands=["core-file /path/to/core"],
+                init_timeout_sec=60,
+            )
+
+        # Verify that the init command was called with the custom timeout
+        # First call should be the init command with timeout 60
+        assert len(timeout_values) >= 1
+        assert timeout_values[0][0] == "core-file /path/to/core"
+        assert timeout_values[0][1] == 60
+        # There may be additional calls for readiness polling with timeout 2
+        assert result["status"] == "success"
 
 
 class TestThreadOperations:
@@ -525,6 +583,57 @@ class TestSessionManagement:
         assert session.is_running is False
 
     @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_stop_session_with_hanging_exit(self, mock_controller_class):
+        """Test that stop handles hanging GDB exit by force-killing."""
+        import time
+
+        mock_controller = MagicMock()
+        mock_process = MagicMock()
+        mock_process.poll.return_value = None  # Process is still running
+
+        # Make exit() hang for longer than timeout
+        def hanging_exit():
+            time.sleep(10)  # Longer than the 1 second timeout we'll use
+
+        mock_controller.exit.side_effect = hanging_exit
+        mock_controller.gdb_process = mock_process
+
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        # Use a very short timeout for the test
+        result = session.stop(timeout_sec=1)
+
+        # Should still succeed (force-killed)
+        assert result["status"] == "success"
+        assert "force killed" in result["message"].lower()
+        # State should be cleaned up
+        assert session.controller is None
+        assert session.is_running is False
+        # Process should have been killed
+        mock_process.kill.assert_called_once()
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_stop_session_cleans_up_on_error(self, mock_controller_class):
+        """Test that stop always cleans up state even if exit fails."""
+        mock_controller = MagicMock()
+        mock_controller.exit.side_effect = Exception("Exit failed")
+        mock_controller.gdb_process = None  # No process to kill
+
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        result = session.stop()
+
+        # Should still clean up state
+        assert result["status"] == "success"
+        assert session.controller is None
+        assert session.is_running is False
+        assert session.target_loaded is False
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
     def test_execute_command_cli(self, mock_controller_class):
         """Test executing a CLI command with active session."""
         mock_controller = MagicMock()
@@ -605,3 +714,212 @@ class TestErrorHandling:
 
         assert result["status"] == "error"
         assert "no result from GDB" in result["message"]
+
+
+class TestNoneResultHandling:
+    """Test cases for handling None results from GDB/MI commands."""
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_backtrace_with_none_result(self, mock_controller_class):
+        """Test that get_backtrace handles None result payload gracefully."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            # Simulate GDB returning None for result (can happen in cross-arch debugging)
+            return {"status": "success", "command": cmd, "result": None}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_backtrace(thread_id=1, max_frames=25)
+
+        assert result["status"] == "success"
+        assert result["frames"] == []
+        assert result["count"] == 0
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_threads_with_none_result(self, mock_controller_class):
+        """Test that get_threads handles None result payload gracefully."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {"status": "success", "command": cmd, "result": None}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_threads()
+
+        assert result["status"] == "success"
+        assert result["threads"] == []
+        assert result["count"] == 0
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_evaluate_expression_with_none_result(self, mock_controller_class):
+        """Test that evaluate_expression handles None result payload gracefully."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {"status": "success", "command": cmd, "result": None}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.evaluate_expression("x + y")
+
+        assert result["status"] == "success"
+        assert result["expression"] == "x + y"
+        assert result["value"] is None
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_variables_with_none_result(self, mock_controller_class):
+        """Test that get_variables handles None result payload gracefully."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        call_count = [0]
+
+        def mock_execute(cmd, **kwargs):
+            call_count[0] += 1
+            # First two calls are thread-select and stack-select-frame
+            # Third call is the actual stack-list-variables
+            if call_count[0] <= 2:
+                return {"status": "success", "command": cmd, "result": {"result": {}}}
+            return {"status": "success", "command": cmd, "result": None}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_variables(thread_id=1, frame=0)
+
+        assert result["status"] == "success"
+        assert result["variables"] == []
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_get_registers_with_none_result(self, mock_controller_class):
+        """Test that get_registers handles None result payload gracefully."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {"status": "success", "command": cmd, "result": None}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.get_registers()
+
+        assert result["status"] == "success"
+        assert result["registers"] == []
+
+
+class TestGDBCrashDetection:
+    """Test cases for detecting GDB crashes during initialization."""
+
+    def test_check_for_gdb_crash_detects_fatal_error(self):
+        """Test that _check_for_gdb_crash detects GDB fatal errors."""
+        session = GDBSession()
+
+        # Simulate a command result with GDB crash messages
+        crash_result = {
+            "status": "success",
+            "result": {
+                "log": [
+                    "Some normal log message\n",
+                    "A fatal error internal to GDB has been detected, further\ndebugging is not possible.\n",
+                    "GDB will now terminate.\n",
+                ]
+            },
+        }
+
+        assert session._check_for_gdb_crash(crash_result) is True
+
+    def test_check_for_gdb_crash_detects_fatal_signal(self):
+        """Test that _check_for_gdb_crash detects GDB fatal signals."""
+        session = GDBSession()
+
+        crash_result = {
+            "status": "success",
+            "result": {
+                "log": [
+                    "Fatal signal: Segmentation fault\n",
+                    "Backtrace unavailable\n",
+                ]
+            },
+        }
+
+        assert session._check_for_gdb_crash(crash_result) is True
+
+    def test_check_for_gdb_crash_no_crash(self):
+        """Test that _check_for_gdb_crash returns False for normal output."""
+        session = GDBSession()
+
+        normal_result = {
+            "status": "success",
+            "result": {
+                "log": [
+                    "Reading symbols from /bin/ls...\n",
+                    "Done.\n",
+                ]
+            },
+        }
+
+        assert session._check_for_gdb_crash(normal_result) is False
+
+    def test_check_for_gdb_crash_error_status(self):
+        """Test that _check_for_gdb_crash returns False for error status."""
+        session = GDBSession()
+
+        error_result = {
+            "status": "error",
+            "message": "Command failed",
+        }
+
+        assert session._check_for_gdb_crash(error_result) is False
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_start_session_detects_gdb_crash(self, mock_controller_class):
+        """Test that start() detects and reports GDB crashes during init commands."""
+        mock_controller = MagicMock()
+        mock_controller_class.return_value = mock_controller
+        mock_controller.get_gdb_response.return_value = []
+
+        session = GDBSession()
+
+        # Mock execute_command to simulate a GDB crash on the second init command
+        call_count = [0]
+
+        def mock_execute(cmd, **kwargs):
+            call_count[0] += 1
+            if "core-file" in cmd:
+                # Simulate GDB crash
+                return {
+                    "status": "success",
+                    "command": cmd,
+                    "result": {
+                        "log": [
+                            "Fatal signal: Segmentation fault\n",
+                            "A fatal error internal to GDB has been detected, further\ndebugging is not possible.\n",
+                        ]
+                    },
+                }
+            return {"status": "success", "command": cmd, "result": {"log": []}}
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.start(
+                init_commands=["set sysroot /path", "core-file /path/to/core"],
+                init_timeout_sec=30,
+            )
+
+        # Should detect crash and return error
+        assert result["status"] == "error"
+        assert "crashed" in result["message"].lower()
+        assert "error_type" in result
+        assert result["error_type"] == "gdb_crash"
+        # State should be cleaned up
+        assert session.controller is None
+        assert session.is_running is False
+        assert session.target_loaded is False
