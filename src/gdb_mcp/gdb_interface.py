@@ -63,6 +63,8 @@ class GDBSession:
             return {"status": "error", "message": "Session already running. Stop it first."}
 
         try:
+            session_start_time = time.time()
+            print(f"\n[GDB SESSION] Starting GDB session...")
             # Start GDB in MI mode
             # Build command list: [gdb_path, --quiet, --interpreter=mi, ...]
             # --quiet suppresses the copyright/license banner
@@ -109,8 +111,13 @@ class GDBSession:
             # Use longer timeout for init commands since operations like loading core dumps can be slow
             init_output = []
             if init_commands:
-                for cmd in init_commands:
+                print(f"\n[GDB INIT] Running {len(init_commands)} init command(s) with timeout={init_timeout_sec}s")
+                for i, cmd in enumerate(init_commands, 1):
+                    init_start = time.time()
+                    print(f"[GDB INIT] Executing init command {i}/{len(init_commands)}: {cmd}")
                     result = self.execute_command(cmd, timeout_sec=init_timeout_sec)
+                    init_elapsed = time.time() - init_start
+                    print(f"[GDB INIT] Init command {i} completed in {init_elapsed:.1f}s, status: {result.get('status')}")
                     init_output.append(result)
                     if "file" in cmd.lower() or "core-file" in cmd.lower():
                         self.target_loaded = True
@@ -146,11 +153,15 @@ class GDBSession:
             # Wait for GDB to be fully ready after initialization
             # This prevents NoneType errors from background symbol loading
             if self.target_loaded or init_commands:
+                print(f"\n[GDB SESSION] Waiting for GDB to be ready after initialization...")
                 ready_info = self._wait_for_gdb_ready(init_timeout_sec)
                 if ready_info.get("ready_warnings"):
                     if "warnings" not in result:
                         result["warnings"] = []
                     result["warnings"].extend(ready_info["ready_warnings"])
+
+            total_elapsed = time.time() - session_start_time
+            print(f"[GDB SESSION] Session started successfully in {total_elapsed:.1f}s")
 
             return result
 
@@ -176,25 +187,34 @@ class GDBSession:
         ready_warnings = []
         attempts = 0
 
+        print(f"\n[GDB READINESS] Waiting for GDB to be ready (timeout: {timeout_sec}s)")
         logger.info(f"Waiting for GDB to be ready (timeout: {timeout_sec}s)")
 
         while (time.time() - start_time) < timeout_sec:
             attempts += 1
+            elapsed = time.time() - start_time
+            print(f"[GDB READINESS] Polling attempt {attempts} at {elapsed:.1f}s")
 
             try:
                 # Try a simple MI command to check if GDB is responsive
                 # Using -gdb-version is safer than -thread-info for processes without threads
                 response = self.execute_command("-gdb-version", timeout_sec=2)
 
+                print(f"[GDB READINESS] Got response: status={response.get('status')}")
+
                 # Check if we got a valid response
                 if response.get("status") == "success":
                     result_payload = response.get("result")
                     if result_payload and result_payload.get("result") is not None:
                         elapsed = time.time() - start_time
+                        print(f"[GDB READINESS] GDB is ready! (after {elapsed:.1f}s, {attempts} attempts)")
                         logger.info(f"GDB ready after {elapsed:.1f}s ({attempts} attempts)")
                         return {"ready": True}
+                    else:
+                        print(f"[GDB READINESS] Response success but result payload empty: {result_payload}")
 
             except Exception as e:
+                print(f"[GDB READINESS] Exception during polling: {e}")
                 logger.debug(f"GDB not ready yet (attempt {attempts}): {e}")
 
             time.sleep(poll_interval)
@@ -238,6 +258,13 @@ class GDBSession:
 
             # Send command and get response
             responses = self.controller.write(actual_command, timeout_sec=timeout_sec)
+
+            # TEMPORARY DEBUG: Print all raw GDB responses
+            print(f"\n[GDB DEBUG] Command: {command}")
+            print(f"[GDB DEBUG] Raw responses ({len(responses)} items):")
+            for i, resp in enumerate(responses):
+                print(f"[GDB DEBUG]   [{i}] {resp}")
+            print("[GDB DEBUG] ---")
 
             # Parse responses
             result = self._parse_responses(responses)
