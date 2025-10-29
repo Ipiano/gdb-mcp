@@ -213,22 +213,28 @@ class GDBSession:
             print(f"[GDB READINESS] === Polling attempt {attempts} at {elapsed:.1f}s (timeout in {remaining:.1f}s) ===", flush=True)
 
             try:
-                # Try a simple MI command to check if GDB is responsive
-                # Using -gdb-version is safer than -thread-info for processes without threads
-                print(f"[GDB READINESS] Sending -gdb-version command...", flush=True)
+                # Query the loaded program's thread info to verify the target is fully loaded
+                # This checks if the program/core is ready, not just if GDB is responsive
+                print(f"[GDB READINESS] Sending -thread-info command to check target readiness...", flush=True)
                 cmd_start = time.time()
-                response = self.execute_command("-gdb-version", timeout_sec=2)
+                response = self.execute_command("-thread-info", timeout_sec=2)
                 cmd_elapsed = time.time() - cmd_start
                 print(f"[GDB READINESS] Command returned after {cmd_elapsed:.1f}s, status={response.get('status')}", flush=True)
 
-                # Check if we got a valid response
+                # Check if we got a valid response about the target
                 if response.get("status") == "success":
                     result_payload = response.get("result")
                     if result_payload and result_payload.get("result") is not None:
-                        elapsed = time.time() - start_time
-                        print(f"[GDB READINESS] ✓ GDB is ready! (after {elapsed:.1f}s, {attempts} attempts)", flush=True)
-                        logger.info(f"GDB ready after {elapsed:.1f}s ({attempts} attempts)")
-                        return {"ready": True}
+                        # Check if we actually got thread information back
+                        thread_data = result_payload.get("result", {})
+                        threads = thread_data.get("threads")
+                        if threads is not None:  # Can be empty list for single-threaded
+                            elapsed = time.time() - start_time
+                            print(f"[GDB READINESS] ✓ Target is ready! Got {len(threads) if isinstance(threads, list) else 'thread'} thread(s) after {elapsed:.1f}s, {attempts} attempts", flush=True)
+                            logger.info(f"GDB ready after {elapsed:.1f}s ({attempts} attempts)")
+                            return {"ready": True}
+                        else:
+                            print(f"[GDB READINESS] ✗ Response success but no thread data yet: {result_payload}", flush=True)
                     else:
                         print(f"[GDB READINESS] ✗ Response success but result payload empty: {result_payload}", flush=True)
                 else:

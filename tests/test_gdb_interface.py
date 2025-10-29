@@ -97,11 +97,11 @@ class TestGDBSessionWithMock:
 
         session = GDBSession()
 
-        # Mock execute_command to return success for readiness check
+        # Mock execute_command to return success for readiness check (-thread-info)
         with patch.object(session, "execute_command") as mock_execute:
             mock_execute.return_value = {
                 "status": "success",
-                "result": {"result": {"version": "GNU gdb 9.0"}},
+                "result": {"result": {"threads": [{"id": "1"}]}},
             }
             result = session.start(program="/bin/ls")
 
@@ -118,11 +118,11 @@ class TestGDBSessionWithMock:
 
         session = GDBSession()
 
-        # Mock execute_command to return success for readiness check
+        # Mock execute_command to return success for readiness check (-thread-info)
         with patch.object(session, "execute_command") as mock_execute:
             mock_execute.return_value = {
                 "status": "success",
-                "result": {"result": {"version": "GNU gdb 9.0"}},
+                "result": {"result": {"threads": [{"id": "1"}]}},
             }
             result = session.start(program="/bin/ls", gdb_path="/usr/local/bin/gdb-custom")
 
@@ -175,11 +175,11 @@ class TestGDBSessionWithMock:
 
         session = GDBSession()
 
-        # Mock execute_command to return success for readiness check
+        # Mock execute_command to return success for readiness check (-thread-info)
         with patch.object(session, "execute_command") as mock_execute:
             mock_execute.return_value = {
                 "status": "success",
-                "result": {"result": {"version": "GNU gdb 9.0"}},
+                "result": {"result": {"threads": [{"id": "1"}]}},
             }
             result = session.start(program="/bin/ls")
 
