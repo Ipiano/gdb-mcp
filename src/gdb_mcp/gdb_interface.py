@@ -828,6 +828,22 @@ class GDBSession:
         if file_type in ["executable", "core"]:
             self.target_loaded = True
 
+        # For core dumps, run 'info shared' to trigger symbol resolution
+        # This helps GDB properly resolve shared library symbols, especially
+        # in cross-architecture debugging or when using sysroot
+        if file_type == "core":
+            print(
+                f"[GDB LOAD FILE] Running 'info shared' to trigger symbol resolution...",
+                flush=True,
+            )
+            info_shared_start = time.time()
+            info_shared_result = self.execute_command("info shared", timeout_sec=30)
+            info_shared_elapsed = time.time() - info_shared_start
+            print(
+                f"[GDB LOAD FILE] 'info shared' completed in {info_shared_elapsed:.1f}s",
+                flush=True,
+            )
+
         # Wait for GDB to be ready after loading
         print(
             f"\n[GDB LOAD FILE] Waiting for GDB to be ready after loading {file_type} file...",
