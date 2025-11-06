@@ -222,6 +222,25 @@ class GDBSession:
 
         return parsed
 
+    def _extract_mi_result(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Extract the MI result payload from a command response.
+
+        GDB/MI commands return results in the format:
+        {"status": "success", "result": {"result": {...actual data...}}}
+
+        This helper extracts the inner "result" dictionary.
+
+        Args:
+            result: The command result dictionary
+
+        Returns:
+            The MI result payload, or None if not found
+        """
+        if result.get("status") != "success":
+            return None
+        return result.get("result", {}).get("result")
+
     def get_threads(self) -> Dict[str, Any]:
         """
         Get information about all threads in the debugged process.
@@ -235,7 +254,7 @@ class GDBSession:
             return result
 
         # Extract thread data from result
-        thread_info = result["result"].get("result", {})
+        thread_info = self._extract_mi_result(result) or {}
         threads = thread_info.get("threads", [])
         current_thread = thread_info.get("current-thread-id")
 
@@ -271,7 +290,7 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        stack_data = result["result"].get("result", {})
+        stack_data = self._extract_mi_result(result) or {}
         frames = stack_data.get("stack", [])
 
         return {"status": "success", "thread_id": thread_id, "frames": frames, "count": len(frames)}
@@ -307,7 +326,7 @@ class GDBSession:
 
         # The MI result payload is in result["result"]["result"]
         # This contains the actual GDB/MI command result
-        mi_result = result.get("result", {}).get("result")
+        mi_result = self._extract_mi_result(result)
 
         # Debug logging
         logger.debug(f"Breakpoint MI result: {mi_result}")
@@ -358,7 +377,7 @@ class GDBSession:
             return result
 
         # Extract breakpoint table from MI result
-        mi_result = result.get("result", {}).get("result", {})
+        mi_result = self._extract_mi_result(result) or {}
 
         # The MI response has a BreakpointTable with body containing array of bkpt objects
         bp_table = mi_result.get("BreakpointTable", {})
@@ -432,7 +451,8 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        value = result["result"].get("result", {}).get("value")
+        mi_result = self._extract_mi_result(result) or {}
+        value = mi_result.get("value")
 
         return {"status": "success", "expression": expression, "value": value}
 
@@ -460,7 +480,8 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        variables = result["result"].get("result", {}).get("variables", [])
+        mi_result = self._extract_mi_result(result) or {}
+        variables = mi_result.get("variables", [])
 
         return {"status": "success", "thread_id": thread_id, "frame": frame, "variables": variables}
 
@@ -471,7 +492,8 @@ class GDBSession:
         if result["status"] == "error":
             return result
 
-        registers = result["result"].get("result", {}).get("register-values", [])
+        mi_result = self._extract_mi_result(result) or {}
+        registers = mi_result.get("register-values", [])
 
         return {"status": "success", "registers": registers}
 
