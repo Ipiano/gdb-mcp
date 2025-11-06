@@ -198,7 +198,7 @@ class GDBSession:
 
     def _parse_responses(self, responses: List[Dict]) -> Dict[str, Any]:
         """Parse GDB/MI responses into a structured format."""
-        parsed = {
+        parsed: Dict[str, Any] = {
             "console": [],
             "log": [],
             "output": [],
@@ -210,15 +210,19 @@ class GDBSession:
             msg_type = response.get("type")
 
             if msg_type == "console":
-                parsed["console"].append(response.get("payload"))
+                console_list: List[Any] = parsed["console"]
+                console_list.append(response.get("payload"))
             elif msg_type == "log":
-                parsed["log"].append(response.get("payload"))
+                log_list: List[Any] = parsed["log"]
+                log_list.append(response.get("payload"))
             elif msg_type == "output":
-                parsed["output"].append(response.get("payload"))
+                output_list: List[Any] = parsed["output"]
+                output_list.append(response.get("payload"))
             elif msg_type == "result":
                 parsed["result"] = response.get("payload")
             elif msg_type == "notify":
-                parsed["notify"].append(response.get("payload"))
+                notify_list: List[Any] = parsed["notify"]
+                notify_list.append(response.get("payload"))
 
         return parsed
 
@@ -239,7 +243,8 @@ class GDBSession:
         """
         if result.get("status") != "success":
             return None
-        return result.get("result", {}).get("result")
+        inner_result: Optional[Dict[str, Any]] = result.get("result", {}).get("result")
+        return inner_result
 
     def get_threads(self) -> Dict[str, Any]:
         """
