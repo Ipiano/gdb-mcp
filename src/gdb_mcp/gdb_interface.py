@@ -265,6 +265,30 @@ class GDBSession:
             "count": len(threads),
         }
 
+    def select_thread(self, thread_id: int) -> Dict[str, Any]:
+        """
+        Select a specific thread to make it the current thread.
+
+        Args:
+            thread_id: Thread ID to select
+
+        Returns:
+            Dict with status and selected thread information
+        """
+        result = self.execute_command(f"-thread-select {thread_id}")
+
+        if result["status"] == "error":
+            return result
+
+        mi_result = self._extract_mi_result(result) or {}
+
+        return {
+            "status": "success",
+            "thread_id": thread_id,
+            "new_thread_id": mi_result.get("new-thread-id"),
+            "frame": mi_result.get("frame"),
+        }
+
     def get_backtrace(
         self, thread_id: Optional[int] = None, max_frames: int = 100
     ) -> Dict[str, Any]:

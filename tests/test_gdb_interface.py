@@ -210,6 +210,32 @@ class TestThreadOperations:
         assert result["current_thread_id"] == "1"
 
     @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_select_thread(self, mock_controller_class):
+        """Test selecting a specific thread."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        def mock_execute(cmd, **kwargs):
+            return {
+                "status": "success",
+                "result": {
+                    "result": {
+                        "new-thread-id": "2",
+                        "frame": {"level": "0", "func": "worker_func"},
+                    }
+                },
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.select_thread(thread_id=2)
+
+        assert result["status"] == "success"
+        assert result["thread_id"] == 2
+        assert result["new_thread_id"] == "2"
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
     def test_get_backtrace_default(self, mock_controller_class):
         """Test backtrace with default parameters."""
         mock_controller = MagicMock()

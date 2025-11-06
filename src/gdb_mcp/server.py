@@ -1,15 +1,11 @@
 """MCP Server for GDB debugging interface."""
 
 import asyncio
+import json
 import logging
 from typing import Any, Optional
 from mcp.server import Server
-from mcp.types import (
-    Tool,
-    TextContent,
-    ImageContent,
-    EmbeddedResource,
-)
+from mcp.types import Tool, TextContent
 from pydantic import BaseModel, Field
 from .gdb_interface import GDBSession
 
@@ -120,6 +116,16 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {},
             },
+        ),
+        Tool(
+            name="gdb_select_thread",
+            description=(
+                "Select a specific thread to make it the current thread. "
+                "After selecting a thread, subsequent commands like gdb_get_backtrace, "
+                "gdb_get_variables, and gdb_evaluate_expression will operate on this thread. "
+                "Use gdb_get_threads to see available thread IDs."
+            ),
+            inputSchema=ThreadSelectArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_get_backtrace",
@@ -264,6 +270,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         elif name == "gdb_get_threads":
             result = gdb_session.get_threads()
 
+        elif name == "gdb_select_thread":
+            args = ThreadSelectArgs(**arguments)
+            result = gdb_session.select_thread(thread_id=args.thread_id)
+
         elif name == "gdb_get_backtrace":
             args = GetBacktraceArgs(**arguments)
             result = gdb_session.get_backtrace(thread_id=args.thread_id, max_frames=args.max_frames)
@@ -307,16 +317,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = {"status": "error", "message": f"Unknown tool: {name}"}
 
         # Format result as text
-        import json
-
         result_text = json.dumps(result, indent=2)
 
         return [TextContent(type="text", text=result_text)]
 
     except Exception as e:
         logger.error(f"Error executing tool {name}: {e}", exc_info=True)
-        import json
-
         error_result = {"status": "error", "message": str(e), "tool": name}
         return [TextContent(type="text", text=json.dumps(error_result, indent=2))]
 
