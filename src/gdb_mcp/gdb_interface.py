@@ -319,6 +319,36 @@ class GDBSession:
 
         return {"status": "success", "thread_id": thread_id, "frames": frames, "count": len(frames)}
 
+    def select_frame(self, frame_number: int) -> Dict[str, Any]:
+        """
+        Select a specific stack frame to make it the current frame.
+
+        Args:
+            frame_number: Frame number (0 is innermost/current frame)
+
+        Returns:
+            Dict with status and frame information
+        """
+        result = self.execute_command(f"-stack-select-frame {frame_number}")
+
+        if result["status"] == "error":
+            return result
+
+        # Get info about the selected frame
+        frame_info_result = self.execute_command("-stack-info-frame")
+
+        if frame_info_result["status"] == "error":
+            return {"status": "success", "frame_number": frame_number, "message": f"Frame {frame_number} selected"}
+
+        mi_result = self._extract_mi_result(frame_info_result) or {}
+        frame_info = mi_result.get("frame", {})
+
+        return {
+            "status": "success",
+            "frame_number": frame_number,
+            "frame": frame_info,
+        }
+
     def set_breakpoint(
         self, location: str, condition: Optional[str] = None, temporary: bool = False
     ) -> Dict[str, Any]:

@@ -68,6 +68,10 @@ class BreakpointNumberArgs(BaseModel):
     number: int = Field(..., description="Breakpoint number")
 
 
+class FrameSelectArgs(BaseModel):
+    frame_number: int = Field(..., description="Frame number (0 is current/innermost frame)")
+
+
 # List available tools
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -138,6 +142,17 @@ async def list_tools() -> list[Tool]:
                 "Shows function calls, file locations, and line numbers."
             ),
             inputSchema=GetBacktraceArgs.model_json_schema(),
+        ),
+        Tool(
+            name="gdb_select_frame",
+            description=(
+                "Select a specific stack frame to make it the current frame. "
+                "Frame 0 is the innermost (current) frame, higher numbers are outer frames. "
+                "After selecting a frame, commands like gdb_get_variables and gdb_evaluate_expression "
+                "will operate in the context of that frame. "
+                "Use gdb_get_backtrace to see available frames and their numbers."
+            ),
+            inputSchema=FrameSelectArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_set_breakpoint",
@@ -307,6 +322,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         elif name == "gdb_get_backtrace":
             args = GetBacktraceArgs(**arguments)
             result = gdb_session.get_backtrace(thread_id=args.thread_id, max_frames=args.max_frames)
+
+        elif name == "gdb_select_frame":
+            args = FrameSelectArgs(**arguments)
+            result = gdb_session.select_frame(frame_number=args.frame_number)
 
         elif name == "gdb_set_breakpoint":
             args = SetBreakpointArgs(**arguments)
