@@ -456,8 +456,7 @@ To update to a newer version:
 cd /path/to/gdb-mcp
 git pull
 source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -r requirements.txt
-pip install -e .
+pip install -e ".[dev]"  # Installs package with all dependencies
 ```
 
 Then restart Claude Desktop.
