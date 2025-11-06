@@ -64,6 +64,10 @@ class ThreadSelectArgs(BaseModel):
     thread_id: int = Field(..., description="Thread ID to select")
 
 
+class BreakpointNumberArgs(BaseModel):
+    number: int = Field(..., description="Breakpoint number")
+
+
 # List available tools
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -159,6 +163,32 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {},
             },
+        ),
+        Tool(
+            name="gdb_delete_breakpoint",
+            description=(
+                "Delete a breakpoint by its number. "
+                "Use gdb_list_breakpoints to see breakpoint numbers. "
+                "Once deleted, the breakpoint cannot be recovered."
+            ),
+            inputSchema=BreakpointNumberArgs.model_json_schema(),
+        ),
+        Tool(
+            name="gdb_enable_breakpoint",
+            description=(
+                "Enable a previously disabled breakpoint by its number. "
+                "Enabled breakpoints will pause execution when hit."
+            ),
+            inputSchema=BreakpointNumberArgs.model_json_schema(),
+        ),
+        Tool(
+            name="gdb_disable_breakpoint",
+            description=(
+                "Disable a breakpoint by its number without deleting it. "
+                "Disabled breakpoints are not hit but remain in the breakpoint list. "
+                "Use gdb_enable_breakpoint to re-enable it later."
+            ),
+            inputSchema=BreakpointNumberArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_continue",
@@ -286,6 +316,18 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         elif name == "gdb_list_breakpoints":
             result = gdb_session.list_breakpoints()
+
+        elif name == "gdb_delete_breakpoint":
+            args = BreakpointNumberArgs(**arguments)
+            result = gdb_session.delete_breakpoint(number=args.number)
+
+        elif name == "gdb_enable_breakpoint":
+            args = BreakpointNumberArgs(**arguments)
+            result = gdb_session.enable_breakpoint(number=args.number)
+
+        elif name == "gdb_disable_breakpoint":
+            args = BreakpointNumberArgs(**arguments)
+            result = gdb_session.disable_breakpoint(number=args.number)
 
         elif name == "gdb_continue":
             result = gdb_session.continue_execution()

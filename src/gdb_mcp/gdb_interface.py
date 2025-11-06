@@ -409,6 +409,57 @@ class GDBSession:
 
         return {"status": "success", "breakpoints": breakpoints, "count": len(breakpoints)}
 
+    def delete_breakpoint(self, number: int) -> Dict[str, Any]:
+        """
+        Delete a breakpoint by its number.
+
+        Args:
+            number: Breakpoint number to delete
+
+        Returns:
+            Dict with status
+        """
+        result = self.execute_command(f"-break-delete {number}")
+
+        if result["status"] == "error":
+            return result
+
+        return {"status": "success", "message": f"Breakpoint {number} deleted"}
+
+    def enable_breakpoint(self, number: int) -> Dict[str, Any]:
+        """
+        Enable a breakpoint by its number.
+
+        Args:
+            number: Breakpoint number to enable
+
+        Returns:
+            Dict with status
+        """
+        result = self.execute_command(f"-break-enable {number}")
+
+        if result["status"] == "error":
+            return result
+
+        return {"status": "success", "message": f"Breakpoint {number} enabled"}
+
+    def disable_breakpoint(self, number: int) -> Dict[str, Any]:
+        """
+        Disable a breakpoint by its number.
+
+        Args:
+            number: Breakpoint number to disable
+
+        Returns:
+            Dict with status
+        """
+        result = self.execute_command(f"-break-disable {number}")
+
+        if result["status"] == "error":
+            return result
+
+        return {"status": "success", "message": f"Breakpoint {number} disabled"}
+
     def continue_execution(self) -> Dict[str, Any]:
         """Continue execution of the program."""
         return self.execute_command("-exec-continue")
