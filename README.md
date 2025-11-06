@@ -67,7 +67,7 @@ Add this to your Claude Desktop configuration file:
 
 ## Available Tools
 
-The GDB MCP Server provides 15 tools for controlling GDB debugging sessions:
+The GDB MCP Server provides 20 tools for controlling GDB debugging sessions:
 
 **Session Management:**
 - `gdb_start_session` - Start a new GDB session with optional initialization
@@ -75,13 +75,20 @@ The GDB MCP Server provides 15 tools for controlling GDB debugging sessions:
 - `gdb_get_status` - Get current session status
 - `gdb_stop_session` - Stop the current session
 
-**Thread Inspection:**
+**Thread & Frame Navigation:**
 - `gdb_get_threads` - List all threads
+- `gdb_select_thread` - Select a specific thread
 - `gdb_get_backtrace` - Get stack trace for a thread
+- `gdb_select_frame` - Select a specific stack frame
 
-**Breakpoints & Execution:**
+**Breakpoint Management:**
 - `gdb_set_breakpoint` - Set breakpoints with optional conditions
 - `gdb_list_breakpoints` - List all breakpoints with structured data
+- `gdb_delete_breakpoint` - Delete a breakpoint by number
+- `gdb_enable_breakpoint` - Enable a breakpoint
+- `gdb_disable_breakpoint` - Disable a breakpoint
+
+**Execution Control:**
 - `gdb_continue` - Continue execution
 - `gdb_step` - Step into functions
 - `gdb_next` - Step over functions
