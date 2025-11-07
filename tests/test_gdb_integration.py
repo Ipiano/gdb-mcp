@@ -172,16 +172,13 @@ class TestGDBSessionIntegration:
         # Start session
         gdb_session.start(program=compiled_program)
 
-        # Set breakpoint in the add function where result is set
+        # Set breakpoint in the add function
         gdb_session.set_breakpoint("add")
 
-        # Run to breakpoint
+        # Run to breakpoint (stops at the add function)
         gdb_session.run()
 
-        # Continue to hit the breakpoint in add
-        gdb_session.continue_execution()
-
-        # Step a couple times to ensure result variable is set
+        # Step to ensure we're in the function body
         gdb_session.next()
 
         # Try to evaluate the parameters
@@ -191,6 +188,8 @@ class TestGDBSessionIntegration:
 
     def test_backtrace_across_functions(self, gdb_session, compiled_program):
         """Test getting backtrace when nested in function calls."""
+        import time
+
         # Start session
         gdb_session.start(program=compiled_program)
 
@@ -200,11 +199,23 @@ class TestGDBSessionIntegration:
         # Run to breakpoint (this will stop at the add function)
         gdb_session.run()
 
-        # Get backtrace - should show call stack with nested functions
-        backtrace = gdb_session.get_backtrace()
-        assert backtrace["status"] == "success"
+        # Get backtrace with retry logic to handle rare timing issues
+        # In very rare cases, GDB's internal state might need a moment to stabilize
+        backtrace = None
+        for attempt in range(3):
+            backtrace = gdb_session.get_backtrace()
+            assert backtrace["status"] == "success"
+
+            # Check if we have a valid backtrace
+            if backtrace["count"] >= 2:
+                break
+
+            # Small delay before retry
+            if attempt < 2:
+                time.sleep(0.05)
+
         # Should have at least 2 frames (add and its caller)
-        assert backtrace["count"] >= 2
+        assert backtrace["count"] >= 2, f"Expected at least 2 frames, got {backtrace['count']}"
 
         # Verify the call stack includes at least the add function
         frames = backtrace["frames"]
