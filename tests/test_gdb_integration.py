@@ -81,35 +81,8 @@ def compiled_program():
 def gdb_session():
     """
     Fixture that provides a GDBSession instance and ensures cleanup.
-
-    Wraps the start() method to automatically disable ASLR randomization
-    control, which can cause permission errors in containerized environments
-    (Docker, CI/CD, etc.).
     """
     session = GDBSession()
-
-    # Wrap the start method to automatically add ASLR configuration
-    original_start = session.start
-
-    def wrapped_start(*args, **kwargs):
-        # Get existing init_commands or create new list
-        init_commands = kwargs.get("init_commands", [])
-        if init_commands is None:
-            init_commands = []
-        else:
-            init_commands = list(init_commands)  # Make a copy
-
-        # Add command to disable ASLR randomization control
-        # This prevents "Error disabling address space randomization" in containers
-        init_commands.insert(0, "set disable-randomization off")
-
-        # Update kwargs with modified init_commands
-        kwargs["init_commands"] = init_commands
-
-        # Call original start method
-        return original_start(*args, **kwargs)
-
-    session.start = wrapped_start
 
     yield session
     # Ensure session is stopped after test
