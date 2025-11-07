@@ -37,6 +37,10 @@ class StartSessionArgs(BaseModel):
         description="Environment variables to set for the debugged program (e.g., {'LD_LIBRARY_PATH': '/custom/libs'})",
     )
     gdb_path: str = Field("gdb", description="Path to GDB executable (default: 'gdb')")
+    working_dir: Optional[str] = Field(
+        None,
+        description="Working directory for GDB session (changes directory before spawning GDB, then restores it)",
+    )
 
 
 class ExecuteCommandArgs(BaseModel):
@@ -251,6 +255,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 init_commands=args.init_commands,
                 env=args.env,
                 gdb_path=args.gdb_path,
+                working_dir=args.working_dir,
             )
 
         elif name == "gdb_execute_command":

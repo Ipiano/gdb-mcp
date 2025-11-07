@@ -30,6 +30,7 @@ class GDBSession:
         init_commands: Optional[List[str]] = None,
         env: Optional[Dict[str, str]] = None,
         gdb_path: str = "gdb",
+        working_dir: Optional[str] = None,
         time_to_check_for_additional_output_sec: float = 0.2,
     ) -> Dict[str, Any]:
         """
@@ -41,6 +42,8 @@ class GDBSession:
             init_commands: List of GDB commands to run on startup (e.g., loading core dumps)
             env: Environment variables to set for the debugged program
             gdb_path: Path to GDB executable
+            working_dir: Working directory to use when starting GDB (changes directory
+                        before spawning GDB process, then restores it)
             time_to_check_for_additional_output_sec: Time to wait for GDB output
 
         Returns:
@@ -58,7 +61,22 @@ class GDBSession:
         if self.controller:
             return {"status": "error", "message": "Session already running. Stop it first."}
 
+        # Save current working directory if we need to change it
+        original_cwd = None
+        if working_dir:
+            original_cwd = os.getcwd()
+
         try:
+            # Change to working directory if specified
+            if working_dir:
+                if not os.path.isdir(working_dir):
+                    return {
+                        "status": "error",
+                        "message": f"Working directory does not exist: {working_dir}",
+                    }
+                os.chdir(working_dir)
+                logger.info(f"Changed working directory to: {working_dir}")
+
             # Start GDB in MI mode
             # Build command list: [gdb_path, --quiet, --interpreter=mi, ...]
             # --quiet suppresses the copyright/license banner
@@ -142,6 +160,11 @@ class GDBSession:
         except Exception as e:
             logger.error(f"Failed to start GDB session: {e}")
             return {"status": "error", "message": f"Failed to start GDB: {str(e)}"}
+        finally:
+            # Restore original working directory if it was changed
+            if original_cwd:
+                os.chdir(original_cwd)
+                logger.info(f"Restored working directory to: {original_cwd}")
 
     def execute_command(self, command: str, timeout_sec: int = 5) -> Dict[str, Any]:
         """
