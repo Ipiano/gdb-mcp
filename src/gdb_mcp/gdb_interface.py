@@ -248,7 +248,9 @@ class GDBSession:
 
         return parsed
 
-    def _wait_for_stopped(self, timeout_sec: float = 5.0) -> Dict[str, Any]:
+    def _wait_for_stopped(
+        self, timeout_sec: float = 5.0, initial_responses: Optional[List[Dict]] = None
+    ) -> Dict[str, Any]:
         """
         Wait for GDB to reach a stopped state after an execution command.
 
@@ -259,6 +261,8 @@ class GDBSession:
 
         Args:
             timeout_sec: Maximum time to wait for stopped state
+            initial_responses: Responses already received from the command that should
+                             be checked first before polling for more
 
         Returns:
             Dict with parsed responses including the stopped notification
@@ -269,7 +273,26 @@ class GDBSession:
         import time
 
         start_time = time.time()
-        all_responses = []
+        all_responses = initial_responses if initial_responses else []
+
+        # First check if we already have a stopped notification in initial responses
+        if initial_responses:
+            for response in initial_responses:
+                if response.get("type") == "notify":
+                    payload = response.get("payload", {})
+                    if isinstance(payload, dict):
+                        msg = payload.get("message", "")
+                        reason = payload.get("reason", "")
+                        if "stopped" in msg or reason in [
+                            "breakpoint-hit",
+                            "end-stepping-range",
+                            "signal-received",
+                            "exited",
+                            "exited-normally",
+                            "exited-signalled",
+                        ]:
+                            # Already have stopped notification
+                            return self._parse_responses(all_responses)
 
         # Poll for responses until we see a stopped notification or timeout
         while time.time() - start_time < timeout_sec:
@@ -485,8 +508,10 @@ class GDBSession:
             # Issue the run command
             responses = self.controller.write("-exec-run", timeout_sec=1)
 
-            # Wait for the program to actually stop
-            stopped_result = self._wait_for_stopped(timeout_sec=10.0)
+            # Wait for the program to actually stop, passing initial responses
+            stopped_result = self._wait_for_stopped(
+                timeout_sec=10.0, initial_responses=responses
+            )
 
             return {"status": "success", "command": "-exec-run", "result": stopped_result}
         except Exception as e:
@@ -510,8 +535,10 @@ class GDBSession:
             # Issue the continue command
             responses = self.controller.write("-exec-continue", timeout_sec=1)
 
-            # Wait for the program to actually stop
-            stopped_result = self._wait_for_stopped(timeout_sec=10.0)
+            # Wait for the program to actually stop, passing initial responses
+            stopped_result = self._wait_for_stopped(
+                timeout_sec=10.0, initial_responses=responses
+            )
 
             return {"status": "success", "command": "-exec-continue", "result": stopped_result}
         except Exception as e:
@@ -534,8 +561,10 @@ class GDBSession:
             # Issue the step command
             responses = self.controller.write("-exec-step", timeout_sec=1)
 
-            # Wait for the step to complete
-            stopped_result = self._wait_for_stopped(timeout_sec=5.0)
+            # Wait for the step to complete, passing initial responses
+            stopped_result = self._wait_for_stopped(
+                timeout_sec=5.0, initial_responses=responses
+            )
 
             return {"status": "success", "command": "-exec-step", "result": stopped_result}
         except Exception as e:
@@ -558,8 +587,10 @@ class GDBSession:
             # Issue the next command
             responses = self.controller.write("-exec-next", timeout_sec=1)
 
-            # Wait for the step to complete
-            stopped_result = self._wait_for_stopped(timeout_sec=5.0)
+            # Wait for the step to complete, passing initial responses
+            stopped_result = self._wait_for_stopped(
+                timeout_sec=5.0, initial_responses=responses
+            )
 
             return {"status": "success", "command": "-exec-next", "result": stopped_result}
         except Exception as e:
