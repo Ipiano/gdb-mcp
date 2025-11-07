@@ -357,7 +357,7 @@ class TestExecutionControl:
         session.is_running = True
 
         # Mock _wait_for_stopped to return a stopped result
-        def mock_wait_for_stopped(timeout_sec=5.0):
+        def mock_wait_for_stopped(timeout_sec=5.0, initial_responses=None):
             return {"notify": [{"reason": "breakpoint-hit"}]}
 
         with patch.object(session, "_wait_for_stopped", side_effect=mock_wait_for_stopped):
@@ -376,7 +376,7 @@ class TestExecutionControl:
         session.is_running = True
 
         # Mock _wait_for_stopped to return a stopped result
-        def mock_wait_for_stopped(timeout_sec=5.0):
+        def mock_wait_for_stopped(timeout_sec=5.0, initial_responses=None):
             return {"notify": [{"reason": "end-stepping-range"}]}
 
         with patch.object(session, "_wait_for_stopped", side_effect=mock_wait_for_stopped):
@@ -395,7 +395,7 @@ class TestExecutionControl:
         session.is_running = True
 
         # Mock _wait_for_stopped to return a stopped result
-        def mock_wait_for_stopped(timeout_sec=5.0):
+        def mock_wait_for_stopped(timeout_sec=5.0, initial_responses=None):
             return {"notify": [{"reason": "end-stepping-range"}]}
 
         with patch.object(session, "_wait_for_stopped", side_effect=mock_wait_for_stopped):
