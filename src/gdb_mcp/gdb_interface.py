@@ -343,7 +343,11 @@ class GDBSession:
         frame_info_result = self.execute_command("-stack-info-frame")
 
         if frame_info_result["status"] == "error":
-            return {"status": "success", "frame_number": frame_number, "message": f"Frame {frame_number} selected"}
+            return {
+                "status": "success",
+                "frame_number": frame_number,
+                "message": f"Frame {frame_number} selected",
+            }
 
         mi_result = self._extract_mi_result(frame_info_result) or {}
         frame_info = mi_result.get("frame", {})
