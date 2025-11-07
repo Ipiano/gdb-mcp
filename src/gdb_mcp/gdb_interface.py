@@ -300,10 +300,7 @@ class GDBSession:
                                 "exited-normally",
                                 "exited-signalled",
                             ]:
-                                # Successfully stopped - add stabilization delay to ensure
-                                # GDB's internal state is fully updated and queryable.
-                                # This delay is critical for reliable backtrace/variable queries.
-                                time.sleep(0.2)
+                                # Successfully stopped
                                 return self._parse_responses(all_responses)
 
             # Small sleep to avoid busy-waiting

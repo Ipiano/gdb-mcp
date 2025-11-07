@@ -214,8 +214,6 @@ class TestGDBSessionIntegration:
 
     def test_backtrace_across_functions(self, gdb_session, compiled_program):
         """Test getting backtrace when nested in function calls."""
-        import time
-
         # Start session
         gdb_session.start(program=compiled_program)
 
@@ -225,20 +223,9 @@ class TestGDBSessionIntegration:
         # Run to breakpoint (this will stop at the add function)
         gdb_session.run()
 
-        # Get backtrace with retry logic to handle rare timing issues
-        # In very rare cases, GDB's internal state might need a moment to stabilize
-        backtrace = None
-        for attempt in range(3):
-            backtrace = gdb_session.get_backtrace()
-            assert backtrace["status"] == "success"
-
-            # Check if we have a valid backtrace
-            if backtrace["count"] >= 2:
-                break
-
-            # Small delay before retry
-            if attempt < 2:
-                time.sleep(0.05)
+        # Get backtrace
+        backtrace = gdb_session.get_backtrace()
+        assert backtrace["status"] == "success"
 
         # Should have at least 2 frames (add and its caller)
         assert backtrace["count"] >= 2, f"Expected at least 2 frames, got {backtrace['count']}"
