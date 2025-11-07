@@ -41,7 +41,6 @@ class StartSessionArgs(BaseModel):
 
 class ExecuteCommandArgs(BaseModel):
     command: str = Field(..., description="GDB command to execute")
-    timeout_sec: int = Field(5, description="Timeout in seconds")
 
 
 class GetBacktraceArgs(BaseModel):
@@ -256,7 +255,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         elif name == "gdb_execute_command":
             args = ExecuteCommandArgs(**arguments)
-            result = gdb_session.execute_command(command=args.command, timeout_sec=args.timeout_sec)
+            result = gdb_session.execute_command(command=args.command)
 
         elif name == "gdb_get_status":
             result = gdb_session.get_status()

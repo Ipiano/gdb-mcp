@@ -56,16 +56,10 @@ class TestExecuteCommandArgs:
         with pytest.raises(ValidationError):
             ExecuteCommandArgs()
 
-    def test_default_timeout(self):
-        """Test default timeout value."""
+    def test_command_arg(self):
+        """Test command argument."""
         args = ExecuteCommandArgs(command="info threads")
         assert args.command == "info threads"
-        assert args.timeout_sec == 5
-
-    def test_custom_timeout(self):
-        """Test custom timeout value."""
-        args = ExecuteCommandArgs(command="info threads", timeout_sec=10)
-        assert args.timeout_sec == 10
 
 
 class TestGetBacktraceArgs:
