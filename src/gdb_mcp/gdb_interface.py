@@ -93,7 +93,8 @@ class GDBSession:
             )
 
             # Get initial responses from GDB startup
-            responses = self.controller.get_gdb_response(timeout_sec=2)
+            # Use longer timeout for CI environments where GDB may start slower
+            responses = self.controller.get_gdb_response(timeout_sec=5)
 
             # Parse initial startup messages
             startup_result = self._parse_responses(responses)
