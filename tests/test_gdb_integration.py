@@ -98,8 +98,10 @@ def gdb_session():
         else:
             init_commands = list(init_commands)  # Make a copy
 
-        # Add command to explicitly enable ASLR disable
-        # This helps avoid random crashes in some environments
+        # Add commands to help avoid random crashes in containerized environments:
+        # - disable-randomization: Try to disable ASLR for the debugged program
+        # - startup-with-shell: Avoid shell wrapper that might have ASLR enabled
+        init_commands.insert(0, "set startup-with-shell off")
         init_commands.insert(0, "set disable-randomization on")
 
         # Update kwargs with modified init_commands
