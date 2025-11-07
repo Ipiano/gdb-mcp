@@ -108,6 +108,16 @@ class GDBSession:
             if "no such file" in startup_console.lower():
                 warnings.append("Program file not found")
 
+            # Run initialization commands first (before env vars)
+            # This allows init_commands to configure GDB settings that affect program loading
+            init_output = []
+            if init_commands:
+                for cmd in init_commands:
+                    result = self.execute_command(cmd)
+                    init_output.append(result)
+                    if "file" in cmd.lower() or "core-file" in cmd.lower():
+                        self.target_loaded = True
+
             # Set environment variables for the debugged program if provided
             # These must be set before the program runs
             env_output = []
@@ -119,16 +129,8 @@ class GDBSession:
                     result = self.execute_command(env_cmd)
                     env_output.append(result)
 
-            # Run initialization commands if provided
-            init_output = []
-            if init_commands:
-                for cmd in init_commands:
-                    result = self.execute_command(cmd)
-                    init_output.append(result)
-                    if "file" in cmd.lower() or "core-file" in cmd.lower():
-                        self.target_loaded = True
-
-            if program and not init_commands:
+            # Set target_loaded if a program was specified (via --args or init commands)
+            if program:
                 self.target_loaded = True
 
             self.is_running = True
