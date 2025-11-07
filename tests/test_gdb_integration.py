@@ -135,7 +135,7 @@ class TestGDBSessionIntegration:
         gdb_session.set_breakpoint("main")
 
         # Run the program (it should stop at main)
-        run_result = gdb_session.execute_command("-exec-run")
+        run_result = gdb_session.run()
         assert run_result["status"] == "success"
 
         # Get backtrace to verify we're at main
@@ -155,7 +155,7 @@ class TestGDBSessionIntegration:
         gdb_session.set_breakpoint("main")
 
         # Run to breakpoint
-        gdb_session.execute_command("-exec-run")
+        gdb_session.run()
 
         # Step a few times
         for _ in range(3):
@@ -176,7 +176,7 @@ class TestGDBSessionIntegration:
         gdb_session.set_breakpoint("add")
 
         # Run to breakpoint
-        gdb_session.execute_command("-exec-run")
+        gdb_session.run()
 
         # Continue to hit the breakpoint in add
         gdb_session.continue_execution()
@@ -198,7 +198,7 @@ class TestGDBSessionIntegration:
         gdb_session.set_breakpoint("add")
 
         # Run to breakpoint (this will stop at the add function)
-        gdb_session.execute_command("-exec-run")
+        gdb_session.run()
 
         # Get backtrace - should show call stack with nested functions
         backtrace = gdb_session.get_backtrace()
@@ -221,7 +221,7 @@ class TestGDBSessionIntegration:
         gdb_session.set_breakpoint("main")
 
         # Run to breakpoint
-        gdb_session.execute_command("-exec-run")
+        gdb_session.run()
 
         # Use next() which should step over function calls
         # This should execute but stay in the same function
@@ -245,7 +245,7 @@ class TestGDBSessionIntegration:
         gdb_session.set_breakpoint("main")
 
         # Run to breakpoint
-        gdb_session.execute_command("-exec-run")
+        gdb_session.run()
 
         # Step a few times to get past variable declarations
         for _ in range(3):
@@ -265,9 +265,8 @@ class TestGDBSessionIntegration:
         # Set breakpoint at add function
         gdb_session.set_breakpoint("add")
 
-        # Run and continue to breakpoint
-        gdb_session.execute_command("-exec-run")
-        gdb_session.continue_execution()
+        # Run to breakpoint
+        gdb_session.run()
 
         # Step to ensure we're in the function body
         gdb_session.next()
@@ -321,7 +320,7 @@ class TestGDBSessionIntegration:
         assert bp_result["status"] == "success"
 
         # Run to hit the breakpoint
-        gdb_session.execute_command("-exec-run")
+        gdb_session.run()
 
         # After hitting a temporary breakpoint once, it should be removed
         # Continue and check breakpoint list

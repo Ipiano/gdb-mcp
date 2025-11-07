@@ -351,49 +351,58 @@ class TestExecutionControl:
     def test_continue_execution(self, mock_controller_class):
         """Test continue execution."""
         mock_controller = MagicMock()
+        mock_controller.write.return_value = []
         session = GDBSession()
         session.controller = mock_controller
         session.is_running = True
 
-        def mock_execute(cmd, **kwargs):
-            return {"status": "success", "result": {"result": None}}
+        # Mock _wait_for_stopped to return a stopped result
+        def mock_wait_for_stopped(timeout_sec=5.0):
+            return {"notify": [{"reason": "breakpoint-hit"}]}
 
-        with patch.object(session, "execute_command", side_effect=mock_execute):
+        with patch.object(session, "_wait_for_stopped", side_effect=mock_wait_for_stopped):
             result = session.continue_execution()
 
         assert result["status"] == "success"
+        mock_controller.write.assert_called_once_with("-exec-continue", timeout_sec=1)
 
     @patch("gdb_mcp.gdb_interface.GdbController")
     def test_step(self, mock_controller_class):
         """Test step into."""
         mock_controller = MagicMock()
+        mock_controller.write.return_value = []
         session = GDBSession()
         session.controller = mock_controller
         session.is_running = True
 
-        def mock_execute(cmd, **kwargs):
-            return {"status": "success", "result": {"result": None}}
+        # Mock _wait_for_stopped to return a stopped result
+        def mock_wait_for_stopped(timeout_sec=5.0):
+            return {"notify": [{"reason": "end-stepping-range"}]}
 
-        with patch.object(session, "execute_command", side_effect=mock_execute):
+        with patch.object(session, "_wait_for_stopped", side_effect=mock_wait_for_stopped):
             result = session.step()
 
         assert result["status"] == "success"
+        mock_controller.write.assert_called_once_with("-exec-step", timeout_sec=1)
 
     @patch("gdb_mcp.gdb_interface.GdbController")
     def test_next(self, mock_controller_class):
         """Test step over."""
         mock_controller = MagicMock()
+        mock_controller.write.return_value = []
         session = GDBSession()
         session.controller = mock_controller
         session.is_running = True
 
-        def mock_execute(cmd, **kwargs):
-            return {"status": "success", "result": {"result": None}}
+        # Mock _wait_for_stopped to return a stopped result
+        def mock_wait_for_stopped(timeout_sec=5.0):
+            return {"notify": [{"reason": "end-stepping-range"}]}
 
-        with patch.object(session, "execute_command", side_effect=mock_execute):
+        with patch.object(session, "_wait_for_stopped", side_effect=mock_wait_for_stopped):
             result = session.next()
 
         assert result["status"] == "success"
+        mock_controller.write.assert_called_once_with("-exec-next", timeout_sec=1)
 
     def test_interrupt_no_controller(self):
         """Test interrupt when no session exists."""

@@ -222,6 +222,72 @@ class GDBSession:
 
         return parsed
 
+    def _wait_for_stopped(self, timeout_sec: float = 5.0) -> Dict[str, Any]:
+        """
+        Wait for GDB to reach a stopped state after an execution command.
+
+        This method polls GDB for additional responses after an async execution
+        command (run, continue, step, next) to ensure the program has actually
+        stopped before returning. This prevents race conditions where subsequent
+        commands are issued before GDB is ready.
+
+        Args:
+            timeout_sec: Maximum time to wait for stopped state
+
+        Returns:
+            Dict with parsed responses including the stopped notification
+        """
+        if not self.controller:
+            return {"status": "error", "message": "No active GDB session"}
+
+        import time
+
+        start_time = time.time()
+        all_responses = []
+
+        # Poll for responses until we see a stopped notification or timeout
+        while time.time() - start_time < timeout_sec:
+            # Get any pending responses (non-blocking with short timeout)
+            responses = self.controller.get_gdb_response(
+                timeout_sec=0.1, raise_error_on_timeout=False
+            )
+
+            if responses:
+                all_responses.extend(responses)
+
+                # Check if we received a stopped notification
+                for response in responses:
+                    if response.get("type") == "notify":
+                        payload = response.get("payload", {})
+                        # Check for various stopped reasons
+                        if isinstance(payload, dict):
+                            # Common stopped messages include:
+                            # - stopped with reason="breakpoint-hit"
+                            # - stopped with reason="end-stepping-range"
+                            # - stopped with reason="signal-received"
+                            msg = payload.get("message", "")
+                            reason = payload.get("reason", "")
+                            if "stopped" in msg or reason in [
+                                "breakpoint-hit",
+                                "end-stepping-range",
+                                "signal-received",
+                                "exited",
+                                "exited-normally",
+                                "exited-signalled",
+                            ]:
+                                # Successfully stopped
+                                return self._parse_responses(all_responses)
+
+            # Small sleep to avoid busy-waiting
+            time.sleep(0.05)
+
+        # Timeout reached - return what we have
+        logger.warning(
+            f"Timeout waiting for stopped state after {timeout_sec}s, "
+            f"returning {len(all_responses)} responses"
+        )
+        return self._parse_responses(all_responses)
+
     def get_threads(self) -> Dict[str, Any]:
         """
         Get information about all threads in the debugged process.
@@ -366,17 +432,113 @@ class GDBSession:
 
         return {"status": "success", "breakpoints": breakpoints, "count": len(breakpoints)}
 
+    def run(self, args: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Run the program (start execution from the beginning).
+
+        This method waits for the program to stop (at a breakpoint, signal, or exit)
+        before returning, ensuring GDB is in a stable state for subsequent commands.
+
+        Args:
+            args: Optional command-line arguments to pass to the program
+
+        Returns:
+            Dict with status and stopped notification details
+        """
+        if not self.controller:
+            return {"status": "error", "message": "No active GDB session"}
+
+        try:
+            # Build the run command
+            if args:
+                # For MI mode, we need to set args first, then run
+                # Set the inferior arguments
+                arg_str = " ".join(args)
+                self.execute_command(f'-exec-arguments {arg_str}')
+
+            # Issue the run command
+            responses = self.controller.write("-exec-run", timeout_sec=1)
+
+            # Wait for the program to actually stop
+            stopped_result = self._wait_for_stopped(timeout_sec=10.0)
+
+            return {"status": "success", "command": "-exec-run", "result": stopped_result}
+        except Exception as e:
+            logger.error(f"Run failed: {e}")
+            return {"status": "error", "message": str(e)}
+
     def continue_execution(self) -> Dict[str, Any]:
-        """Continue execution of the program."""
-        return self.execute_command("-exec-continue")
+        """
+        Continue execution of the program.
+
+        This method waits for the program to stop (at a breakpoint, signal, or exit)
+        before returning, ensuring GDB is in a stable state for subsequent commands.
+
+        Returns:
+            Dict with status and stopped notification details
+        """
+        if not self.controller:
+            return {"status": "error", "message": "No active GDB session"}
+
+        try:
+            # Issue the continue command
+            responses = self.controller.write("-exec-continue", timeout_sec=1)
+
+            # Wait for the program to actually stop
+            stopped_result = self._wait_for_stopped(timeout_sec=10.0)
+
+            return {"status": "success", "command": "-exec-continue", "result": stopped_result}
+        except Exception as e:
+            logger.error(f"Continue execution failed: {e}")
+            return {"status": "error", "message": str(e)}
 
     def step(self) -> Dict[str, Any]:
-        """Step into (single instruction)."""
-        return self.execute_command("-exec-step")
+        """
+        Step into (single source line, entering functions).
+
+        This method waits for the step to complete before returning.
+
+        Returns:
+            Dict with status and stopped notification details
+        """
+        if not self.controller:
+            return {"status": "error", "message": "No active GDB session"}
+
+        try:
+            # Issue the step command
+            responses = self.controller.write("-exec-step", timeout_sec=1)
+
+            # Wait for the step to complete
+            stopped_result = self._wait_for_stopped(timeout_sec=5.0)
+
+            return {"status": "success", "command": "-exec-step", "result": stopped_result}
+        except Exception as e:
+            logger.error(f"Step failed: {e}")
+            return {"status": "error", "message": str(e)}
 
     def next(self) -> Dict[str, Any]:
-        """Step over (next line)."""
-        return self.execute_command("-exec-next")
+        """
+        Step over (next source line, not entering functions).
+
+        This method waits for the step to complete before returning.
+
+        Returns:
+            Dict with status and stopped notification details
+        """
+        if not self.controller:
+            return {"status": "error", "message": "No active GDB session"}
+
+        try:
+            # Issue the next command
+            responses = self.controller.write("-exec-next", timeout_sec=1)
+
+            # Wait for the step to complete
+            stopped_result = self._wait_for_stopped(timeout_sec=5.0)
+
+            return {"status": "success", "command": "-exec-next", "result": stopped_result}
+        except Exception as e:
+            logger.error(f"Next failed: {e}")
+            return {"status": "error", "message": str(e)}
 
     def interrupt(self) -> Dict[str, Any]:
         """
