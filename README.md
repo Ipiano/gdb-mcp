@@ -16,7 +16,6 @@ An MCP (Model Context Protocol) server that provides AI assistants with programm
 This server uses the **GDB/MI (Machine Interface)** protocol, which is the same interface used by professional IDEs. It provides:
 
 - Structured, machine-parseable output
-- Async notifications for state changes
 - Full access to GDB's debugging capabilities
 - Reliable command execution and response handling
 
@@ -243,9 +242,8 @@ Always check the `warnings` field in `gdb_start_session` response! Compile your 
 ## Contributing
 
 Contributions welcome! Areas for improvement:
-- Additional GDB commands
-- Better error handling
-- Async event notifications
+- Additional GDB commands (e.g., watchpoints, memory inspection)
+- Better error handling and recovery
 - Enhanced output formatting
 
 ## License
