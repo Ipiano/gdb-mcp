@@ -93,7 +93,7 @@ def gdb_session():
 
     def wrapped_start(*args, **kwargs):
         # Get existing init_commands or create new list
-        init_commands = kwargs.get('init_commands', [])
+        init_commands = kwargs.get("init_commands", [])
         if init_commands is None:
             init_commands = []
         else:
@@ -104,7 +104,7 @@ def gdb_session():
         init_commands.insert(0, "set disable-randomization off")
 
         # Update kwargs with modified init_commands
-        kwargs['init_commands'] = init_commands
+        kwargs["init_commands"] = init_commands
 
         # Call original start method
         return original_start(*args, **kwargs)

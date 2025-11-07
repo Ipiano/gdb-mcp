@@ -479,7 +479,7 @@ class GDBSession:
                 # For MI mode, we need to set args first, then run
                 # Set the inferior arguments
                 arg_str = " ".join(args)
-                self.execute_command(f'-exec-arguments {arg_str}')
+                self.execute_command(f"-exec-arguments {arg_str}")
 
             # Issue the run command
             responses = self.controller.write("-exec-run", timeout_sec=1)
