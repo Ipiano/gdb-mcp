@@ -39,7 +39,13 @@ class StartSessionArgs(BaseModel):
     gdb_path: str = Field("gdb", description="Path to GDB executable (default: 'gdb')")
     working_dir: Optional[str] = Field(
         None,
-        description="Working directory for GDB session (changes directory before spawning GDB, then restores it)",
+        description=(
+            "Working directory to use when starting GDB. "
+            "Use this when debugging programs that need to be run from a specific directory, "
+            "or when the program expects to find files (config, data, etc.) relative to its working directory. "
+            "GDB will be started in this directory, then the original directory is restored. "
+            "Example: If debugging a server that loads config from './config.json', set working_dir to the server's directory."
+        ),
     )
 
 
@@ -84,8 +90,10 @@ async def list_tools() -> list[Tool]:
                 "Automatically detects and reports important warnings such as: "
                 "missing debug symbols (not compiled with -g), file not found, or invalid executable. "
                 "Check the 'warnings' field in the response for critical issues that may affect debugging. "
-                "Examples of init_commands: 'core-file /path/to/core', 'set sysroot /path', "
-                "'set solib-search-path /path'"
+                "Available parameters: program (executable path), args (program arguments), "
+                "init_commands (GDB commands like 'core-file /path/to/core', 'set sysroot /path'), "
+                "env (environment variables), gdb_path (GDB binary path), "
+                "working_dir (directory to run program from - use when program needs specific working directory)."
             ),
             inputSchema=StartSessionArgs.model_json_schema(),
         ),
