@@ -116,7 +116,14 @@ class GDBSession:
                 for cmd in init_commands:
                     result = self.execute_command(cmd)
                     init_output.append(result)
-                    if "file" in cmd.lower() or "core-file" in cmd.lower():
+
+                    # After core-file or file commands, wait for GDB to finish loading
+                    # symbols and be ready for subsequent commands
+                    if "core-file" in cmd.lower() or (cmd.lower().startswith("file ") or cmd.lower() == "file"):
+                        logger.info(f"Waiting for GDB to finish loading after: {cmd}")
+                        self._wait_for_gdb_ready(initial_wait=0.5, max_wait=30.0)
+                        self.target_loaded = True
+                    elif "file" in cmd.lower():
                         self.target_loaded = True
 
             # Set environment variables for the debugged program if provided
@@ -168,6 +175,52 @@ class GDBSession:
             if original_cwd:
                 os.chdir(original_cwd)
                 logger.info(f"Restored working directory to: {original_cwd}")
+
+    def _wait_for_gdb_ready(self, initial_wait: float = 0.5, max_wait: float = 10.0) -> None:
+        """
+        Wait for GDB to finish background processing (like loading symbols).
+
+        After commands like 'core-file', GDB may continue processing in the background
+        even after responding to the command. This method waits for console output
+        to stop, indicating GDB is ready for the next command.
+
+        Args:
+            initial_wait: Initial wait time before starting to poll
+            max_wait: Maximum time to wait for GDB to become ready
+        """
+        import time
+
+        time.sleep(initial_wait)
+
+        start_time = time.time()
+        last_output_time = start_time
+
+        while time.time() - start_time < max_wait:
+            # Check for any additional output
+            responses = self.controller.get_gdb_response(
+                timeout_sec=0.1, raise_error_on_timeout=False
+            )
+
+            if responses:
+                # Got output, update last output time
+                last_output_time = time.time()
+
+                # Check if any response indicates completion
+                for response in responses:
+                    if response.get("type") == "console":
+                        console_msg = response.get("payload", "")
+                        logger.debug(f"Background output: {console_msg.strip()}")
+            else:
+                # No output - check if enough quiet time has passed
+                quiet_time = time.time() - last_output_time
+                if quiet_time >= 0.5:
+                    # GDB has been quiet for 0.5s, likely ready
+                    logger.debug("GDB appears ready after background processing")
+                    return
+
+            time.sleep(0.1)
+
+        logger.warning(f"Timeout waiting for GDB to finish background processing after {max_wait}s")
 
     def execute_command(self, command: str, timeout_sec: int = 5) -> Dict[str, Any]:
         """
@@ -350,7 +403,21 @@ class GDBSession:
             return result
 
         # Extract thread data from result
-        thread_info = result["result"].get("result", {})
+        # Handle case where GDB might still be loading (result["result"] is None)
+        result_data = result.get("result")
+        if result_data is None:
+            return {
+                "status": "error",
+                "message": "GDB returned no data - may still be loading symbols or not ready",
+            }
+
+        thread_info = result_data.get("result", {})
+        if thread_info is None:
+            return {
+                "status": "error",
+                "message": "GDB returned incomplete data - may still be loading symbols",
+            }
+
         threads = thread_info.get("threads", [])
         current_thread = thread_info.get("current-thread-id")
 
