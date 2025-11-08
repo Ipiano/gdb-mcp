@@ -22,6 +22,7 @@ class GDBSession:
         self.controller: Optional[GdbController] = None
         self.is_running = False
         self.target_loaded = False
+        self.original_cwd: Optional[str] = None  # Store original working directory
 
     def start(
         self,
@@ -62,9 +63,9 @@ class GDBSession:
             return {"status": "error", "message": "Session already running. Stop it first."}
 
         # Save current working directory if we need to change it
-        original_cwd = None
+        # This will be restored when stop() is called
         if working_dir:
-            original_cwd = os.getcwd()
+            self.original_cwd = os.getcwd()
 
         try:
             # Change to working directory if specified
@@ -177,12 +178,12 @@ class GDBSession:
 
         except Exception as e:
             logger.error(f"Failed to start GDB session: {e}")
+            # If session failed to start, restore working directory immediately
+            if self.original_cwd:
+                os.chdir(self.original_cwd)
+                logger.info(f"Restored working directory after failed start: {self.original_cwd}")
+                self.original_cwd = None
             return {"status": "error", "message": f"Failed to start GDB: {str(e)}"}
-        finally:
-            # Restore original working directory if it was changed
-            if original_cwd:
-                os.chdir(original_cwd)
-                logger.info(f"Restored working directory to: {original_cwd}")
 
     def _is_gdb_alive(self) -> bool:
         """Check if the GDB process is still running."""
@@ -805,10 +806,24 @@ class GDBSession:
             self.is_running = False
             self.target_loaded = False
 
+            # Restore original working directory if it was changed during start()
+            if self.original_cwd:
+                os.chdir(self.original_cwd)
+                logger.info(f"Restored working directory to: {self.original_cwd}")
+                self.original_cwd = None
+
             return {"status": "success", "message": "GDB session stopped"}
 
         except Exception as e:
             logger.error(f"Failed to stop GDB session: {e}")
+            # Still try to restore working directory even if stop failed
+            if self.original_cwd:
+                try:
+                    os.chdir(self.original_cwd)
+                    logger.info(f"Restored working directory after error: {self.original_cwd}")
+                    self.original_cwd = None
+                except Exception as cwd_error:
+                    logger.warning(f"Failed to restore working directory: {cwd_error}")
             return {"status": "error", "message": str(e)}
 
     def get_status(self) -> Dict[str, Any]:
