@@ -114,17 +114,25 @@ class GDBSession:
             init_output = []
             if init_commands:
                 for cmd in init_commands:
-                    result = self.execute_command(cmd)
-                    init_output.append(result)
+                    try:
+                        result = self.execute_command(cmd)
+                        init_output.append(result)
 
-                    # After core-file or file commands, wait for GDB to finish loading
-                    # symbols and be ready for subsequent commands
-                    if "core-file" in cmd.lower() or (cmd.lower().startswith("file ") or cmd.lower() == "file"):
-                        logger.info(f"Waiting for GDB to finish loading after: {cmd}")
-                        self._wait_for_gdb_ready(initial_wait=0.5, max_wait=30.0)
-                        self.target_loaded = True
-                    elif "file" in cmd.lower():
-                        self.target_loaded = True
+                        # Check if command failed
+                        if result.get("status") == "error":
+                            logger.warning(f"Init command failed: {cmd} - {result.get('message')}")
+
+                        # After core-file or file commands, wait for GDB to finish loading
+                        # symbols and be ready for subsequent commands
+                        if "core-file" in cmd.lower() or (cmd.lower().startswith("file ") or cmd.lower() == "file"):
+                            logger.info(f"Waiting for GDB to finish loading after: {cmd}")
+                            self._wait_for_gdb_ready(initial_wait=0.5, max_wait=30.0)
+                            self.target_loaded = True
+                        elif "file" in cmd.lower():
+                            self.target_loaded = True
+                    except Exception as e:
+                        logger.error(f"Exception during init command '{cmd}': {e}")
+                        init_output.append({"status": "error", "command": cmd, "message": str(e)})
 
             # Set environment variables for the debugged program if provided
             # These must be set before the program runs
@@ -176,6 +184,18 @@ class GDBSession:
                 os.chdir(original_cwd)
                 logger.info(f"Restored working directory to: {original_cwd}")
 
+    def _is_gdb_alive(self) -> bool:
+        """Check if the GDB process is still running."""
+        if not self.controller or not hasattr(self.controller, 'gdb_process'):
+            return False
+
+        try:
+            # Check if process is alive by checking its return code
+            # poll() returns None if still running, or the exit code if exited
+            return self.controller.gdb_process.poll() is None
+        except Exception:
+            return False
+
     def _wait_for_gdb_ready(self, initial_wait: float = 0.5, max_wait: float = 10.0) -> None:
         """
         Wait for GDB to finish background processing (like loading symbols).
@@ -196,27 +216,40 @@ class GDBSession:
         last_output_time = start_time
 
         while time.time() - start_time < max_wait:
-            # Check for any additional output
-            responses = self.controller.get_gdb_response(
-                timeout_sec=0.1, raise_error_on_timeout=False
-            )
+            # First check if GDB is still alive
+            if not self._is_gdb_alive():
+                logger.error("GDB process has exited during symbol loading")
+                raise RuntimeError("GDB process exited unexpectedly - possibly out of memory, corrupted core, or incompatible binary")
 
-            if responses:
-                # Got output, update last output time
-                last_output_time = time.time()
+            try:
+                # Check for any additional output
+                responses = self.controller.get_gdb_response(
+                    timeout_sec=0.1, raise_error_on_timeout=False
+                )
 
-                # Check if any response indicates completion
-                for response in responses:
-                    if response.get("type") == "console":
-                        console_msg = response.get("payload", "")
-                        logger.debug(f"Background output: {console_msg.strip()}")
-            else:
-                # No output - check if enough quiet time has passed
-                quiet_time = time.time() - last_output_time
-                if quiet_time >= 0.5:
-                    # GDB has been quiet for 0.5s, likely ready
-                    logger.debug("GDB appears ready after background processing")
-                    return
+                if responses:
+                    # Got output, update last output time
+                    last_output_time = time.time()
+
+                    # Check if any response indicates completion
+                    for response in responses:
+                        if response.get("type") == "console":
+                            console_msg = response.get("payload", "")
+                            logger.debug(f"Background output: {console_msg.strip()}")
+                else:
+                    # No output - check if enough quiet time has passed
+                    quiet_time = time.time() - last_output_time
+                    if quiet_time >= 0.5:
+                        # GDB has been quiet for 0.5s, likely ready
+                        logger.debug("GDB appears ready after background processing")
+                        return
+
+            except (BrokenPipeError, OSError) as e:
+                # GDB process may have exited
+                logger.warning(f"GDB process communication error: {e}")
+                if not self._is_gdb_alive():
+                    raise RuntimeError(f"GDB process exited unexpectedly during symbol loading: {e}")
+                return
 
             time.sleep(0.1)
 
