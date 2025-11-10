@@ -118,7 +118,18 @@ class GDBSession:
                 for cmd in init_commands:
                     try:
                         logger.info(f"Executing init command: {cmd}")
-                        result = self.execute_command(cmd)
+
+                        # Use longer timeout for core-file and file commands
+                        # Loading large core dumps can take several minutes
+                        if "core-file" in cmd.lower() or cmd.lower().startswith("file "):
+                            timeout = 300  # 5 minutes for loading core/executable files
+                            logger.info(
+                                f"Using extended timeout ({timeout}s) for file loading command"
+                            )
+                        else:
+                            timeout = 30  # Default timeout
+
+                        result = self.execute_command(cmd, timeout_sec=timeout)
                         init_output.append(result)
 
                         # Check if command failed
@@ -225,9 +236,13 @@ class GDBSession:
 
             # Check if process is alive by checking its return code
             # poll() returns None if still running, or the exit code if exited
-            return gdb_process.poll() is None
-        except Exception:
+            poll_result = gdb_process.poll()
+            if poll_result is not None:
+                logger.error(f"GDB process exited with code {poll_result}")
+            return poll_result is None
+        except Exception as e:
             # If we can't check, assume alive to avoid false positives in tests
+            logger.debug(f"Exception checking if GDB alive: {e}, assuming alive")
             return True
 
     def _send_command_and_wait_for_prompt(
@@ -288,16 +303,43 @@ class GDBSession:
         command_responses = []
         async_notifications = []
         start_time = time.time()
+        last_alive_check = start_time
 
         while time.time() - start_time < timeout_sec:
-            if not self._is_gdb_alive():
-                logger.error("GDB process died while waiting for response")
-                return {
-                    "command_responses": command_responses,
-                    "async_notifications": async_notifications,
-                    "timed_out": False,
-                    "error": "GDB process exited unexpectedly",
-                }
+            # Check if GDB is alive periodically (every 1 second) to avoid overhead
+            elapsed = time.time() - start_time
+            if elapsed - last_alive_check >= 1.0:
+                if not self._is_gdb_alive():
+                    # Get the exit code for diagnostics
+                    exit_code = None
+                    try:
+                        if hasattr(self.controller, "gdb_process") and isinstance(
+                            self.controller.gdb_process, subprocess.Popen
+                        ):
+                            exit_code = self.controller.gdb_process.poll()
+                    except:
+                        pass
+
+                    error_details = f"GDB process exited unexpectedly after {elapsed:.1f}s"
+                    if exit_code is not None:
+                        if exit_code == -9:
+                            error_details += " (exit code -9: killed, likely out of memory)"
+                        elif exit_code == -6:
+                            error_details += " (exit code -6: aborted, possibly assertion failure)"
+                        elif exit_code == -11:
+                            error_details += " (exit code -11: segmentation fault)"
+                        else:
+                            error_details += f" (exit code {exit_code})"
+
+                    logger.error(error_details)
+                    return {
+                        "command_responses": command_responses,
+                        "async_notifications": async_notifications,
+                        "timed_out": False,
+                        "error": error_details,
+                    }
+                last_alive_check = elapsed
+                logger.debug(f"Still waiting for response... ({elapsed:.1f}s elapsed)")
 
             try:
                 # Try to get responses with a short timeout
