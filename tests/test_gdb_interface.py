@@ -90,13 +90,22 @@ class TestGDBSessionWithMock:
         mock_controller = MagicMock()
         mock_controller_class.return_value = mock_controller
 
-        # Mock GDB responses
-        mock_controller.get_gdb_response.return_value = [
-            {"type": "console", "payload": "Reading symbols from /bin/ls...\n"}
-        ]
-
         session = GDBSession()
-        result = session.start(program="/bin/ls")
+
+        # Mock the initialization check
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [
+                    {"type": "console", "payload": "Reading symbols from /bin/ls...\n"},
+                    {"type": "result", "message": "done", "token": 1000},
+                ],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            result = session.start(program="/bin/ls")
 
         assert result["status"] == "success"
         assert result["program"] == "/bin/ls"
@@ -107,10 +116,20 @@ class TestGDBSessionWithMock:
         """Test session start with custom GDB path."""
         mock_controller = MagicMock()
         mock_controller_class.return_value = mock_controller
-        mock_controller.get_gdb_response.return_value = []
 
         session = GDBSession()
-        result = session.start(program="/bin/ls", gdb_path="/usr/local/bin/gdb-custom")
+
+        # Mock the initialization check
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [{"type": "result", "message": "done", "token": 1000}],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            result = session.start(program="/bin/ls", gdb_path="/usr/local/bin/gdb-custom")
 
         # Verify GdbController was called with correct command
         call_args = mock_controller_class.call_args
@@ -125,7 +144,6 @@ class TestGDBSessionWithMock:
         """Test session start with environment variables."""
         mock_controller = MagicMock()
         mock_controller_class.return_value = mock_controller
-        mock_controller.get_gdb_response.return_value = []
 
         session = GDBSession()
 
@@ -137,10 +155,20 @@ class TestGDBSessionWithMock:
                 env_commands.append(cmd)
             return {"status": "success", "command": cmd, "output": ""}
 
-        with patch.object(session, "execute_command", side_effect=mock_execute):
-            result = session.start(
-                program="/bin/ls", env={"DEBUG_MODE": "1", "LOG_LEVEL": "verbose"}
-            )
+        # Mock both initialization and execute_command
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [{"type": "result", "message": "done", "token": 1000}],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            with patch.object(session, "execute_command", side_effect=mock_execute):
+                result = session.start(
+                    program="/bin/ls", env={"DEBUG_MODE": "1", "LOG_LEVEL": "verbose"}
+                )
 
         # Verify environment commands were executed
         assert len(env_commands) == 2
@@ -153,14 +181,23 @@ class TestGDBSessionWithMock:
         mock_controller = MagicMock()
         mock_controller_class.return_value = mock_controller
 
-        # Mock response with "no debugging symbols" warning
-        mock_controller.get_gdb_response.return_value = [
-            {"type": "console", "payload": "Reading symbols from /bin/ls...\n"},
-            {"type": "console", "payload": "(no debugging symbols found)...done.\n"},
-        ]
-
         session = GDBSession()
-        result = session.start(program="/bin/ls")
+
+        # Mock initialization with debug symbol warning
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [
+                    {"type": "console", "payload": "Reading symbols from /bin/ls...\n"},
+                    {"type": "console", "payload": "(no debugging symbols found)...done.\n"},
+                    {"type": "result", "message": "done", "token": 1000},
+                ],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            result = session.start(program="/bin/ls")
 
         assert result["status"] == "success"
         assert "warnings" in result

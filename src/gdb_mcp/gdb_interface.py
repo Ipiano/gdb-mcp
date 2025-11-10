@@ -94,12 +94,25 @@ class GDBSession:
                 time_to_check_for_additional_output_sec=time_to_check_for_additional_output_sec,
             )
 
-            # Get initial responses from GDB startup
-            # Use longer timeout for CI environments where GDB may start slower
-            responses = self.controller.get_gdb_response(timeout_sec=5)
+            # Wait for GDB to be ready (send a no-op command and wait for result)
+            # This ensures GDB has completed initialization before we send real commands
+            logger.debug("Waiting for GDB initialization to complete...")
+            ready_check = self._send_command_and_wait_for_prompt("-gdb-version", timeout_sec=10)
 
-            # Parse initial startup messages
-            startup_result = self._parse_responses(responses)
+            if "error" in ready_check or ready_check.get("timed_out"):
+                error_msg = ready_check.get("error", "Timeout waiting for GDB to initialize")
+                logger.error(f"GDB failed to initialize: {error_msg}")
+                self.controller.exit()
+                self.controller = None
+                return {
+                    "status": "error",
+                    "message": f"GDB failed to initialize: {error_msg}",
+                }
+
+            logger.info("GDB initialized and ready")
+
+            # Parse the version info for startup messages
+            startup_result = self._parse_responses(ready_check.get("command_responses", []))
             startup_console = "".join(startup_result.get("console", []))
 
             # Check for common warnings/issues in startup
