@@ -122,7 +122,7 @@ class GDBSession:
 
                         # Check if command failed
                         if result.get("status") == "error":
-                            error_msg = result.get('message', 'Unknown error')
+                            error_msg = result.get("message", "Unknown error")
                             logger.error(f"Init command '{cmd}' failed: {error_msg}")
 
                             # If GDB has died, fail the entire start operation
@@ -136,11 +136,17 @@ class GDBSession:
 
                         # After core-file or file commands, wait for GDB to finish loading
                         # symbols and be ready for subsequent commands
-                        if "core-file" in cmd.lower() or (cmd.lower().startswith("file ") or cmd.lower() == "file"):
+                        if "core-file" in cmd.lower() or (
+                            cmd.lower().startswith("file ") or cmd.lower() == "file"
+                        ):
                             logger.info(f"Waiting for GDB to finish loading after: {cmd}")
                             self._wait_for_gdb_ready(initial_wait=0.5, max_wait=30.0)
+                            logger.info(f"GDB finished loading after command: {cmd}")
                             self.target_loaded = True
                         elif "file" in cmd.lower():
+                            logger.debug(
+                                f"Setting target_loaded=True after file-related command: {cmd}"
+                            )
                             self.target_loaded = True
                     except Exception as e:
                         logger.error(f"Exception during init command '{cmd}': {e}", exc_info=True)
@@ -213,7 +219,7 @@ class GDBSession:
         try:
             # Only check if this is a real GdbController with an actual subprocess.Popen
             # For tests with mocks, assume the process is alive
-            if not hasattr(self.controller, 'gdb_process'):
+            if not hasattr(self.controller, "gdb_process"):
                 return True
 
             gdb_process = self.controller.gdb_process
@@ -244,16 +250,22 @@ class GDBSession:
         """
         import time
 
+        logger.debug(
+            f"_wait_for_gdb_ready: starting with initial_wait={initial_wait}s, max_wait={max_wait}s"
+        )
         time.sleep(initial_wait)
 
         start_time = time.time()
         last_output_time = start_time
+        response_count = 0
 
         while time.time() - start_time < max_wait:
             # First check if GDB is still alive
             if not self._is_gdb_alive():
                 logger.error("GDB process has exited during symbol loading")
-                raise RuntimeError("GDB process exited unexpectedly - possibly out of memory, corrupted core, or incompatible binary")
+                raise RuntimeError(
+                    "GDB process exited unexpectedly - possibly out of memory, corrupted core, or incompatible binary"
+                )
 
             try:
                 # Check for any additional output
@@ -264,30 +276,49 @@ class GDBSession:
                 if responses:
                     # Got output, update last output time
                     last_output_time = time.time()
+                    response_count += len(responses)
+                    logger.debug(
+                        f"_wait_for_gdb_ready: received {len(responses)} responses (total: {response_count})"
+                    )
 
                     # Check if any response indicates completion
                     for response in responses:
-                        if response.get("type") == "console":
+                        response_type = response.get("type")
+                        logger.debug(
+                            f"_wait_for_gdb_ready: response type={response_type}, payload={response.get('payload', '')[:100]}"
+                        )
+                        if response_type == "console":
                             console_msg = response.get("payload", "")
                             logger.debug(f"Background output: {console_msg.strip()}")
                 else:
                     # No output - check if enough quiet time has passed
                     quiet_time = time.time() - last_output_time
+                    elapsed = time.time() - start_time
+                    logger.debug(
+                        f"_wait_for_gdb_ready: no output for {quiet_time:.2f}s, elapsed={elapsed:.2f}s"
+                    )
                     if quiet_time >= 0.5:
                         # GDB has been quiet for 0.5s, likely ready
-                        logger.debug("GDB appears ready after background processing")
+                        logger.debug(
+                            f"_wait_for_gdb_ready: GDB ready after {elapsed:.2f}s, received {response_count} total responses"
+                        )
                         return
 
             except (BrokenPipeError, OSError) as e:
                 # GDB process may have exited
                 logger.warning(f"GDB process communication error: {e}")
                 if not self._is_gdb_alive():
-                    raise RuntimeError(f"GDB process exited unexpectedly during symbol loading: {e}")
+                    raise RuntimeError(
+                        f"GDB process exited unexpectedly during symbol loading: {e}"
+                    )
                 return
 
             time.sleep(0.1)
 
-        logger.warning(f"Timeout waiting for GDB to finish background processing after {max_wait}s")
+        elapsed = time.time() - start_time
+        logger.warning(
+            f"Timeout waiting for GDB to finish background processing after {elapsed:.2f}s (max: {max_wait}s), received {response_count} responses"
+        )
 
     def execute_command(self, command: str, timeout_sec: int = 5) -> Dict[str, Any]:
         """
@@ -485,22 +516,31 @@ class GDBSession:
         Returns:
             Dict with thread information
         """
+        logger.debug("get_threads() called")
         result = self.execute_command("-thread-info")
+        logger.debug(f"get_threads: execute_command returned: {result}")
 
         if result["status"] == "error":
+            logger.debug(f"get_threads: returning error from execute_command")
             return result
 
         # Extract thread data from result
         # Handle case where GDB might still be loading (result["result"] is None)
         result_data = result.get("result")
+        logger.debug(f"get_threads: result_data type={type(result_data)}, value={result_data}")
+
         if result_data is None:
+            logger.warning("get_threads: result_data is None - GDB may still be loading")
             return {
                 "status": "error",
                 "message": "GDB returned no data - may still be loading symbols or not ready",
             }
 
         thread_info = result_data.get("result", {})
+        logger.debug(f"get_threads: thread_info type={type(thread_info)}, value={thread_info}")
+
         if thread_info is None:
+            logger.warning("get_threads: thread_info is None - GDB returned incomplete data")
             return {
                 "status": "error",
                 "message": "GDB returned incomplete data - may still be loading symbols",
@@ -508,6 +548,10 @@ class GDBSession:
 
         threads = thread_info.get("threads", [])
         current_thread = thread_info.get("current-thread-id")
+        logger.debug(
+            f"get_threads: found {len(threads)} threads, current_thread_id={current_thread}"
+        )
+        logger.debug(f"get_threads: threads data: {threads}")
 
         return {
             "status": "success",
@@ -664,9 +708,7 @@ class GDBSession:
             responses = self.controller.write("-exec-run", timeout_sec=1)
 
             # Wait for the program to actually stop, passing initial responses
-            stopped_result = self._wait_for_stopped(
-                timeout_sec=10.0, initial_responses=responses
-            )
+            stopped_result = self._wait_for_stopped(timeout_sec=10.0, initial_responses=responses)
 
             return {"status": "success", "command": "-exec-run", "result": stopped_result}
         except Exception as e:
@@ -691,9 +733,7 @@ class GDBSession:
             responses = self.controller.write("-exec-continue", timeout_sec=1)
 
             # Wait for the program to actually stop, passing initial responses
-            stopped_result = self._wait_for_stopped(
-                timeout_sec=10.0, initial_responses=responses
-            )
+            stopped_result = self._wait_for_stopped(timeout_sec=10.0, initial_responses=responses)
 
             return {"status": "success", "command": "-exec-continue", "result": stopped_result}
         except Exception as e:
@@ -717,9 +757,7 @@ class GDBSession:
             responses = self.controller.write("-exec-step", timeout_sec=1)
 
             # Wait for the step to complete, passing initial responses
-            stopped_result = self._wait_for_stopped(
-                timeout_sec=5.0, initial_responses=responses
-            )
+            stopped_result = self._wait_for_stopped(timeout_sec=5.0, initial_responses=responses)
 
             return {"status": "success", "command": "-exec-step", "result": stopped_result}
         except Exception as e:
@@ -743,9 +781,7 @@ class GDBSession:
             responses = self.controller.write("-exec-next", timeout_sec=1)
 
             # Wait for the step to complete, passing initial responses
-            stopped_result = self._wait_for_stopped(
-                timeout_sec=5.0, initial_responses=responses
-            )
+            stopped_result = self._wait_for_stopped(timeout_sec=5.0, initial_responses=responses)
 
             return {"status": "success", "command": "-exec-next", "result": stopped_result}
         except Exception as e:
