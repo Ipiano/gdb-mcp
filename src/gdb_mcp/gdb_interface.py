@@ -96,8 +96,9 @@ class GDBSession:
 
             # Wait for GDB to be ready (send a no-op command and wait for result)
             # This ensures GDB has completed initialization before we send real commands
+            # Timeout is based on inactivity - as long as GDB produces output, we wait
             logger.debug("Waiting for GDB initialization to complete...")
-            ready_check = self._send_command_and_wait_for_prompt("-gdb-version", timeout_sec=10)
+            ready_check = self._send_command_and_wait_for_prompt("-gdb-version", timeout_sec=30)
 
             if "error" in ready_check or ready_check.get("timed_out"):
                 error_msg = ready_check.get("error", "Timeout waiting for GDB to initialize")
@@ -313,12 +314,15 @@ class GDBSession:
             }
 
         # Read responses until we see the (gdb) prompt
+        # Timeout is based on inactivity, not total elapsed time
+        # As long as GDB keeps producing output, we keep waiting
         command_responses = []
         async_notifications = []
         start_time = time.time()
+        last_activity_time = start_time  # Track when we last received output
         last_alive_check = start_time
 
-        while time.time() - start_time < timeout_sec:
+        while time.time() - last_activity_time < timeout_sec:
             # Check if GDB is alive periodically (every 1 second) to avoid overhead
             elapsed = time.time() - start_time
             if elapsed - last_alive_check >= 1.0:
@@ -352,7 +356,10 @@ class GDBSession:
                         "error": error_details,
                     }
                 last_alive_check = elapsed
-                logger.debug(f"Still waiting for response... ({elapsed:.1f}s elapsed)")
+                inactive_time = time.time() - last_activity_time
+                logger.debug(
+                    f"Still waiting for response... (total: {elapsed:.1f}s, inactive: {inactive_time:.1f}s)"
+                )
 
             try:
                 # Try to get responses with a short timeout
@@ -362,6 +369,9 @@ class GDBSession:
 
                 if not responses:
                     continue
+
+                # Got responses - update last activity time
+                last_activity_time = time.time()
 
                 for response in responses:
                     response_type = response.get("type")
@@ -415,8 +425,9 @@ class GDBSession:
                     "error": f"Communication error: {e}",
                 }
 
-        # Timeout reached
-        logger.warning(f"Timeout waiting for (gdb) prompt after {timeout_sec}s")
+        # Timeout reached - GDB stopped producing output
+        elapsed = time.time() - start_time
+        logger.warning(f"Timeout: no GDB output for {timeout_sec}s (total elapsed: {elapsed:.1f}s)")
         return {
             "command_responses": command_responses,
             "async_notifications": async_notifications,
