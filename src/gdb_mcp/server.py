@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from typing import Any, Optional
 from mcp.server import Server
 from mcp.types import (
@@ -13,8 +14,12 @@ from mcp.types import (
 from pydantic import BaseModel, Field
 from .gdb_interface import GDBSession
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+# Set up logging - use GDB_MCP_LOG_LEVEL environment variable
+log_level = os.environ.get("GDB_MCP_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, log_level, logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 # Global GDB session instance
