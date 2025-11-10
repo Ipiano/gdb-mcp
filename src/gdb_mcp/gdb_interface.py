@@ -316,29 +316,40 @@ class GDBSession:
                         f"Received: type={response_type}, token={response_token}, message={response.get('message')}"
                     )
 
-                    # Categorize response based on token
-                    if response_token == token:
-                        # This response is for our command
-                        command_responses.append(response)
+                    # According to GDB/MI spec, output is:
+                    #   ( out-of-band-record )* [ result-record ] "(gdb)"
+                    #
+                    # When we send a command with token N:
+                    # - We get various out-of-band records (console, notify, etc.)
+                    #   These may have no token or different tokens
+                    # - We get a result record with token N
+                    # - Then we get (gdb) prompt (not exposed by pygdbmi)
+                    #
+                    # Since we operate synchronously (one command at a time),
+                    # ALL responses between sending command and receiving result
+                    # are part of this command's output.
 
-                        # Check if this is the result record (command complete)
-                        # The (gdb) prompt comes after this, but pygdbmi doesn't expose it
-                        if response_type == "result":
-                            logger.debug(
-                                f"Received result record for token {token}, command complete"
-                            )
-                            return {
-                                "command_responses": command_responses,
-                                "async_notifications": async_notifications,
-                                "timed_out": False,
-                            }
+                    # Check if this is the result record for our command
+                    if response_type == "result" and response_token == token:
+                        # Command complete - add result and return everything
+                        command_responses.append(response)
+                        logger.debug(f"Received result record for token {token}, command complete")
+                        return {
+                            "command_responses": command_responses,
+                            "async_notifications": async_notifications,
+                            "timed_out": False,
+                        }
+
+                    # This is output related to our command (or truly async)
+                    # For synchronous operation, assume it's command output
+                    if response_token == token or response_token is None:
+                        command_responses.append(response)
                     else:
-                        # This is an async notification or from a different command
+                        # Response with different token - truly async or from old command
                         async_notifications.append(response)
-                        if response_type == "notify":
-                            logger.info(
-                                f"Async notification: {response.get('message')} - {response.get('payload')}"
-                            )
+                        logger.info(
+                            f"Async notification (token={response_token}): {response.get('message')} - {response.get('payload')}"
+                        )
 
             except (BrokenPipeError, OSError) as e:
                 logger.error(f"Communication error while reading responses: {e}")
