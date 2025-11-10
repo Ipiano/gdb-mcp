@@ -350,59 +350,65 @@ class TestExecutionControl:
     @patch("gdb_mcp.gdb_interface.GdbController")
     def test_continue_execution(self, mock_controller_class):
         """Test continue execution."""
-        mock_controller = MagicMock()
-        mock_controller.write.return_value = []
         session = GDBSession()
-        session.controller = mock_controller
+        session.controller = MagicMock()  # Just need a controller object
         session.is_running = True
 
-        # Mock _wait_for_stopped to return a stopped result
-        def mock_wait_for_stopped(timeout_sec=5.0, initial_responses=None):
-            return {"notify": [{"reason": "breakpoint-hit"}]}
-
-        with patch.object(session, "_wait_for_stopped", side_effect=mock_wait_for_stopped):
+        # Mock execute_command since continue_execution now just calls it
+        with patch.object(
+            session,
+            "execute_command",
+            return_value={
+                "status": "success",
+                "result": {"notify": [{"reason": "breakpoint-hit"}]},
+            },
+        ) as mock_execute:
             result = session.continue_execution()
 
         assert result["status"] == "success"
-        mock_controller.write.assert_called_once_with("-exec-continue", timeout_sec=1)
+        mock_execute.assert_called_once_with("-exec-continue")
 
     @patch("gdb_mcp.gdb_interface.GdbController")
     def test_step(self, mock_controller_class):
         """Test step into."""
-        mock_controller = MagicMock()
-        mock_controller.write.return_value = []
         session = GDBSession()
-        session.controller = mock_controller
+        session.controller = MagicMock()  # Just need a controller object
         session.is_running = True
 
-        # Mock _wait_for_stopped to return a stopped result
-        def mock_wait_for_stopped(timeout_sec=5.0, initial_responses=None):
-            return {"notify": [{"reason": "end-stepping-range"}]}
-
-        with patch.object(session, "_wait_for_stopped", side_effect=mock_wait_for_stopped):
+        # Mock execute_command since step now just calls it
+        with patch.object(
+            session,
+            "execute_command",
+            return_value={
+                "status": "success",
+                "result": {"notify": [{"reason": "end-stepping-range"}]},
+            },
+        ) as mock_execute:
             result = session.step()
 
         assert result["status"] == "success"
-        mock_controller.write.assert_called_once_with("-exec-step", timeout_sec=1)
+        mock_execute.assert_called_once_with("-exec-step")
 
     @patch("gdb_mcp.gdb_interface.GdbController")
     def test_next(self, mock_controller_class):
         """Test step over."""
-        mock_controller = MagicMock()
-        mock_controller.write.return_value = []
         session = GDBSession()
-        session.controller = mock_controller
+        session.controller = MagicMock()  # Just need a controller object
         session.is_running = True
 
-        # Mock _wait_for_stopped to return a stopped result
-        def mock_wait_for_stopped(timeout_sec=5.0, initial_responses=None):
-            return {"notify": [{"reason": "end-stepping-range"}]}
-
-        with patch.object(session, "_wait_for_stopped", side_effect=mock_wait_for_stopped):
+        # Mock execute_command since next now just calls it
+        with patch.object(
+            session,
+            "execute_command",
+            return_value={
+                "status": "success",
+                "result": {"notify": [{"reason": "end-stepping-range"}]},
+            },
+        ) as mock_execute:
             result = session.next()
 
         assert result["status"] == "success"
-        mock_controller.write.assert_called_once_with("-exec-next", timeout_sec=1)
+        mock_execute.assert_called_once_with("-exec-next")
 
     def test_interrupt_no_controller(self):
         """Test interrupt when no session exists."""
@@ -536,17 +542,24 @@ class TestSessionManagement:
     @patch("gdb_mcp.gdb_interface.GdbController")
     def test_execute_command_cli(self, mock_controller_class):
         """Test executing a CLI command with active session."""
-        mock_controller = MagicMock()
-        mock_controller.write.return_value = [
-            {"type": "console", "payload": "Thread 1 (main)\n"},
-            {"type": "result", "payload": None},
-        ]
-
         session = GDBSession()
-        session.controller = mock_controller
+        session.controller = MagicMock()  # Just need a controller object
         session.is_running = True
 
-        result = session.execute_command("info threads")
+        # Mock the internal send_command method
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [
+                    {"type": "console", "payload": "Thread 1 (main)\n"},
+                    {"type": "result", "payload": None, "token": 1000},
+                ],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            result = session.execute_command("info threads")
 
         assert result["status"] == "success"
         assert "Thread 1" in result["output"]
@@ -554,16 +567,23 @@ class TestSessionManagement:
     @patch("gdb_mcp.gdb_interface.GdbController")
     def test_execute_command_mi(self, mock_controller_class):
         """Test executing an MI command with active session."""
-        mock_controller = MagicMock()
-        mock_controller.write.return_value = [
-            {"type": "result", "payload": {"threads": []}},
-        ]
-
         session = GDBSession()
-        session.controller = mock_controller
+        session.controller = MagicMock()  # Just need a controller object
         session.is_running = True
 
-        result = session.execute_command("-thread-info")
+        # Mock the internal send_command method
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [
+                    {"type": "result", "payload": {"threads": []}, "token": 1000},
+                ],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            result = session.execute_command("-thread-info")
 
         assert result["status"] == "success"
         assert "result" in result
@@ -585,15 +605,23 @@ class TestErrorHandling:
 
     @patch("gdb_mcp.gdb_interface.GdbController")
     def test_execute_command_exception(self, mock_controller_class):
-        """Test that execute_command handles exceptions."""
-        mock_controller = MagicMock()
-        mock_controller.write.side_effect = Exception("Timeout")
-
+        """Test that execute_command handles errors."""
         session = GDBSession()
-        session.controller = mock_controller
+        session.controller = MagicMock()
         session.is_running = True
 
-        result = session.execute_command("info threads")
+        # Mock _send_command_and_wait_for_prompt to return error
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "error": "Timeout",
+                "command_responses": [],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            result = session.execute_command("info threads")
 
         assert result["status"] == "error"
         assert "Timeout" in result["message"]

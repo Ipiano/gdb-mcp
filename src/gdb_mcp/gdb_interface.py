@@ -23,6 +23,7 @@ class GDBSession:
         self.is_running = False
         self.target_loaded = False
         self.original_cwd: Optional[str] = None  # Store original working directory
+        self._command_token = 1000  # Token counter for GDB/MI commands
 
     def start(
         self,
@@ -134,16 +135,9 @@ class GDBSession:
                                     "init_output": init_output,
                                 }
 
-                        # After core-file or file commands, wait for GDB to finish loading
-                        # symbols and be ready for subsequent commands
-                        if "core-file" in cmd.lower() or (
-                            cmd.lower().startswith("file ") or cmd.lower() == "file"
-                        ):
-                            logger.info(f"Waiting for GDB to finish loading after: {cmd}")
-                            self._wait_for_gdb_ready(initial_wait=0.5, max_wait=30.0)
-                            logger.info(f"GDB finished loading after command: {cmd}")
-                            self.target_loaded = True
-                        elif "file" in cmd.lower():
+                        # Set target_loaded flag for file-related commands
+                        # No need to wait explicitly - execute_command waits for (gdb) prompt
+                        if "file" in cmd.lower():
                             logger.debug(
                                 f"Setting target_loaded=True after file-related command: {cmd}"
                             )
@@ -236,100 +230,145 @@ class GDBSession:
             # If we can't check, assume alive to avoid false positives in tests
             return True
 
-    def _wait_for_gdb_ready(self, initial_wait: float = 0.5, max_wait: float = 10.0) -> None:
+    def _send_command_and_wait_for_prompt(
+        self, command: str, timeout_sec: float = 30.0
+    ) -> Dict[str, Any]:
         """
-        Wait for GDB to finish background processing (like loading symbols).
+        Send a GDB/MI command with a token and wait for the (gdb) prompt.
 
-        After commands like 'core-file', GDB may continue processing in the background
-        even after responding to the command. This method waits for console output
-        to stop, indicating GDB is ready for the next command.
+        This method properly implements the GDB/MI protocol by:
+        1. Sending commands with a unique token
+        2. Reading responses until the (gdb) prompt appears
+        3. Separating command responses (matching token) from async notifications
 
         Args:
-            initial_wait: Initial wait time before starting to poll
-            max_wait: Maximum time to wait for GDB to become ready
+            command: GDB/MI command to send (with or without '-' prefix)
+            timeout_sec: Maximum time to wait for (gdb) prompt
+
+        Returns:
+            Dict with:
+                - command_responses: list of responses matching the command token
+                - async_notifications: list of async responses (no token or different token)
+                - timed_out: bool indicating if we hit the timeout
         """
         import time
 
-        logger.debug(
-            f"_wait_for_gdb_ready: starting with initial_wait={initial_wait}s, max_wait={max_wait}s"
-        )
-        time.sleep(initial_wait)
+        if not self.controller:
+            return {
+                "command_responses": [],
+                "async_notifications": [],
+                "timed_out": True,
+                "error": "No active GDB session",
+            }
 
+        # Get next token and increment counter
+        token = self._command_token
+        self._command_token += 1
+
+        # Add token prefix to command
+        tokenized_command = f"{token}{command}"
+
+        logger.debug(f"Sending tokenized command: {tokenized_command}")
+
+        # Write command to GDB without waiting for response
+        # (we'll manually read until we see the prompt)
+        try:
+            self.controller.io_manager.stdin.write((tokenized_command + "\n").encode())
+            self.controller.io_manager.stdin.flush()
+        except (BrokenPipeError, OSError) as e:
+            logger.error(f"Failed to send command: {e}")
+            return {
+                "command_responses": [],
+                "async_notifications": [],
+                "timed_out": False,
+                "error": f"Failed to send command: {e}",
+            }
+
+        # Read responses until we see the (gdb) prompt
+        command_responses = []
+        async_notifications = []
         start_time = time.time()
-        last_output_time = start_time
-        response_count = 0
 
-        while time.time() - start_time < max_wait:
-            # First check if GDB is still alive
+        while time.time() - start_time < timeout_sec:
             if not self._is_gdb_alive():
-                logger.error("GDB process has exited during symbol loading")
-                raise RuntimeError(
-                    "GDB process exited unexpectedly - possibly out of memory, corrupted core, or incompatible binary"
-                )
+                logger.error("GDB process died while waiting for response")
+                return {
+                    "command_responses": command_responses,
+                    "async_notifications": async_notifications,
+                    "timed_out": False,
+                    "error": "GDB process exited unexpectedly",
+                }
 
             try:
-                # Check for any additional output
+                # Try to get responses with a short timeout
                 responses = self.controller.get_gdb_response(
                     timeout_sec=0.1, raise_error_on_timeout=False
                 )
 
-                if responses:
-                    # Got output, update last output time
-                    last_output_time = time.time()
-                    response_count += len(responses)
+                if not responses:
+                    continue
+
+                for response in responses:
+                    response_type = response.get("type")
+                    response_token = response.get("token")
+
                     logger.debug(
-                        f"_wait_for_gdb_ready: received {len(responses)} responses (total: {response_count})"
+                        f"Received: type={response_type}, token={response_token}, message={response.get('message')}"
                     )
 
-                    # Check if any response indicates completion
-                    for response in responses:
-                        response_type = response.get("type")
-                        logger.debug(
-                            f"_wait_for_gdb_ready: response type={response_type}, payload={response.get('payload', '')[:100]}"
-                        )
-                        if response_type == "console":
-                            console_msg = response.get("payload", "")
-                            logger.debug(f"Background output: {console_msg.strip()}")
-                else:
-                    # No output - check if enough quiet time has passed
-                    quiet_time = time.time() - last_output_time
-                    elapsed = time.time() - start_time
-                    logger.debug(
-                        f"_wait_for_gdb_ready: no output for {quiet_time:.2f}s, elapsed={elapsed:.2f}s"
-                    )
-                    if quiet_time >= 0.5:
-                        # GDB has been quiet for 0.5s, likely ready
-                        logger.debug(
-                            f"_wait_for_gdb_ready: GDB ready after {elapsed:.2f}s, received {response_count} total responses"
-                        )
-                        return
+                    # Categorize response based on token
+                    if response_token == token:
+                        # This response is for our command
+                        command_responses.append(response)
+
+                        # Check if this is the result record (command complete)
+                        # The (gdb) prompt comes after this, but pygdbmi doesn't expose it
+                        if response_type == "result":
+                            logger.debug(
+                                f"Received result record for token {token}, command complete"
+                            )
+                            return {
+                                "command_responses": command_responses,
+                                "async_notifications": async_notifications,
+                                "timed_out": False,
+                            }
+                    else:
+                        # This is an async notification or from a different command
+                        async_notifications.append(response)
+                        if response_type == "notify":
+                            logger.info(
+                                f"Async notification: {response.get('message')} - {response.get('payload')}"
+                            )
 
             except (BrokenPipeError, OSError) as e:
-                # GDB process may have exited
-                logger.warning(f"GDB process communication error: {e}")
-                if not self._is_gdb_alive():
-                    raise RuntimeError(
-                        f"GDB process exited unexpectedly during symbol loading: {e}"
-                    )
-                return
+                logger.error(f"Communication error while reading responses: {e}")
+                return {
+                    "command_responses": command_responses,
+                    "async_notifications": async_notifications,
+                    "timed_out": False,
+                    "error": f"Communication error: {e}",
+                }
 
-            time.sleep(0.1)
+        # Timeout reached
+        logger.warning(f"Timeout waiting for (gdb) prompt after {timeout_sec}s")
+        return {
+            "command_responses": command_responses,
+            "async_notifications": async_notifications,
+            "timed_out": True,
+        }
 
-        elapsed = time.time() - start_time
-        logger.warning(
-            f"Timeout waiting for GDB to finish background processing after {elapsed:.2f}s (max: {max_wait}s), received {response_count} responses"
-        )
-
-    def execute_command(self, command: str, timeout_sec: int = 5) -> Dict[str, Any]:
+    def execute_command(self, command: str, timeout_sec: int = 30) -> Dict[str, Any]:
         """
         Execute a GDB command and return the parsed response.
 
-        Automatically handles both MI commands (starting with '-') and CLI commands.
-        CLI commands are wrapped with -interpreter-exec for proper output capture.
+        Uses the GDB/MI protocol properly by sending commands with tokens and waiting
+        for the (gdb) prompt. Automatically handles both MI commands (starting with '-')
+        and CLI commands. CLI commands are wrapped with -interpreter-exec for proper
+        output capture.
 
         Args:
             command: GDB command to execute (MI or CLI command)
-            timeout_sec: Timeout for command execution
+            timeout_sec: Timeout for command execution (default: 30s)
 
         Returns:
             Dict containing the command result and output
@@ -346,53 +385,52 @@ class GDBSession:
                 "command": command,
             }
 
-        try:
-            # Detect if this is a CLI command (doesn't start with '-')
-            # CLI commands need to be wrapped with -interpreter-exec
-            is_cli_command = not command.strip().startswith("-")
-            actual_command = command
+        # Detect if this is a CLI command (doesn't start with '-')
+        # CLI commands need to be wrapped with -interpreter-exec
+        is_cli_command = not command.strip().startswith("-")
+        actual_command = command
 
-            if is_cli_command:
-                # Escape quotes in the command
-                escaped_command = command.replace('"', '\\"')
-                actual_command = f'-interpreter-exec console "{escaped_command}"'
-                logger.debug(f"Wrapping CLI command: {command} -> {actual_command}")
+        if is_cli_command:
+            # Escape quotes in the command
+            escaped_command = command.replace('"', '\\"')
+            actual_command = f'-interpreter-exec console "{escaped_command}"'
+            logger.debug(f"Wrapping CLI command: {command} -> {actual_command}")
 
-            # Send command and get response
-            logger.debug(f"Sending command to GDB: {actual_command}")
-            responses = self.controller.write(actual_command, timeout_sec=timeout_sec)
-            logger.debug(f"Got {len(responses)} responses from GDB")
+        # Send command and wait for (gdb) prompt using the proper MI protocol
+        result = self._send_command_and_wait_for_prompt(actual_command, timeout_sec)
 
-            # Parse responses
-            result = self._parse_responses(responses)
+        # Check for errors
+        if "error" in result:
+            return {
+                "status": "error",
+                "message": result["error"],
+                "command": command,
+            }
 
-            # For CLI commands, format the output more clearly
-            if is_cli_command:
-                # Combine all console output
-                console_output = "".join(result.get("console", []))
+        if result.get("timed_out"):
+            return {
+                "status": "error",
+                "message": f"Timeout waiting for command response after {timeout_sec}s",
+                "command": command,
+            }
 
-                return {
-                    "status": "success",
-                    "command": command,
-                    "output": console_output.strip() if console_output else "(no output)",
-                }
-            else:
-                # For MI commands, return structured result
-                return {"status": "success", "command": command, "result": result}
+        # Parse command responses
+        command_responses = result.get("command_responses", [])
+        parsed = self._parse_responses(command_responses)
 
-        except (BrokenPipeError, OSError) as e:
-            logger.error(f"Communication error with GDB while executing '{command}': {e}")
-            # Check if GDB died
-            if not self._is_gdb_alive():
-                return {
-                    "status": "error",
-                    "message": f"GDB process exited unexpectedly while executing command - possibly crashed due to: {e}",
-                    "command": command,
-                }
-            return {"status": "error", "command": command, "message": f"Communication error: {e}"}
-        except Exception as e:
-            logger.error(f"Command execution failed for '{command}': {e}", exc_info=True)
-            return {"status": "error", "command": command, "message": str(e)}
+        # For CLI commands, format the output more clearly
+        if is_cli_command:
+            # Combine all console output
+            console_output = "".join(parsed.get("console", []))
+
+            return {
+                "status": "success",
+                "command": command,
+                "output": console_output.strip() if console_output else "(no output)",
+            }
+        else:
+            # For MI commands, return structured result
+            return {"status": "success", "command": command, "result": parsed}
 
     def _parse_responses(self, responses: List[Dict]) -> Dict[str, Any]:
         """Parse GDB/MI responses into a structured format."""
@@ -419,95 +457,6 @@ class GDBSession:
                 parsed["notify"].append(response.get("payload"))
 
         return parsed
-
-    def _wait_for_stopped(
-        self, timeout_sec: float = 5.0, initial_responses: Optional[List[Dict]] = None
-    ) -> Dict[str, Any]:
-        """
-        Wait for GDB to reach a stopped state after an execution command.
-
-        This method polls GDB for additional responses after an async execution
-        command (run, continue, step, next) to ensure the program has actually
-        stopped before returning. This prevents race conditions where subsequent
-        commands are issued before GDB is ready.
-
-        Args:
-            timeout_sec: Maximum time to wait for stopped state
-            initial_responses: Responses already received from the command that should
-                             be checked first before polling for more
-
-        Returns:
-            Dict with parsed responses including the stopped notification
-        """
-        if not self.controller:
-            return {"status": "error", "message": "No active GDB session"}
-
-        import time
-
-        start_time = time.time()
-        all_responses = initial_responses if initial_responses else []
-
-        # First check if we already have a stopped notification in initial responses
-        if initial_responses:
-            for response in initial_responses:
-                if response.get("type") == "notify":
-                    payload = response.get("payload", {})
-                    if isinstance(payload, dict):
-                        msg = payload.get("message", "")
-                        reason = payload.get("reason", "")
-                        if "stopped" in msg or reason in [
-                            "breakpoint-hit",
-                            "end-stepping-range",
-                            "signal-received",
-                            "exited",
-                            "exited-normally",
-                            "exited-signalled",
-                        ]:
-                            # Already have stopped notification
-                            return self._parse_responses(all_responses)
-
-        # Poll for responses until we see a stopped notification or timeout
-        while time.time() - start_time < timeout_sec:
-            # Get any pending responses (non-blocking with short timeout)
-            responses = self.controller.get_gdb_response(
-                timeout_sec=0.1, raise_error_on_timeout=False
-            )
-
-            if responses:
-                all_responses.extend(responses)
-
-                # Check if we received a stopped notification
-                for response in responses:
-                    if response.get("type") == "notify":
-                        payload = response.get("payload", {})
-                        # Check for various stopped reasons
-                        if isinstance(payload, dict):
-                            # Common stopped messages include:
-                            # - stopped with reason="breakpoint-hit"
-                            # - stopped with reason="end-stepping-range"
-                            # - stopped with reason="signal-received"
-                            msg = payload.get("message", "")
-                            reason = payload.get("reason", "")
-                            if "stopped" in msg or reason in [
-                                "breakpoint-hit",
-                                "end-stepping-range",
-                                "signal-received",
-                                "exited",
-                                "exited-normally",
-                                "exited-signalled",
-                            ]:
-                                # Successfully stopped
-                                return self._parse_responses(all_responses)
-
-            # Small sleep to avoid busy-waiting
-            time.sleep(0.05)
-
-        # Timeout reached - return what we have
-        logger.warning(
-            f"Timeout waiting for stopped state after {timeout_sec}s, "
-            f"returning {len(all_responses)} responses"
-        )
-        return self._parse_responses(all_responses)
 
     def get_threads(self) -> Dict[str, Any]:
         """
@@ -684,109 +633,63 @@ class GDBSession:
         """
         Run the program (start execution from the beginning).
 
-        This method waits for the program to stop (at a breakpoint, signal, or exit)
-        before returning, ensuring GDB is in a stable state for subsequent commands.
+        Waits for the program to stop (at a breakpoint, signal, or exit) before
+        returning. The (gdb) prompt indicates GDB is ready for subsequent commands.
 
         Args:
             args: Optional command-line arguments to pass to the program
 
         Returns:
-            Dict with status and stopped notification details
+            Dict with status and execution result
         """
         if not self.controller:
             return {"status": "error", "message": "No active GDB session"}
 
-        try:
-            # Build the run command
-            if args:
-                # For MI mode, we need to set args first, then run
-                # Set the inferior arguments
-                arg_str = " ".join(args)
-                self.execute_command(f"-exec-arguments {arg_str}")
+        # Set program arguments if provided
+        if args:
+            arg_str = " ".join(args)
+            result = self.execute_command(f"-exec-arguments {arg_str}")
+            if result.get("status") == "error":
+                return result
 
-            # Issue the run command
-            responses = self.controller.write("-exec-run", timeout_sec=1)
-
-            # Wait for the program to actually stop, passing initial responses
-            stopped_result = self._wait_for_stopped(timeout_sec=10.0, initial_responses=responses)
-
-            return {"status": "success", "command": "-exec-run", "result": stopped_result}
-        except Exception as e:
-            logger.error(f"Run failed: {e}")
-            return {"status": "error", "message": str(e)}
+        # Run the program - execute_command waits for (gdb) prompt
+        return self.execute_command("-exec-run")
 
     def continue_execution(self) -> Dict[str, Any]:
         """
         Continue execution of the program.
 
-        This method waits for the program to stop (at a breakpoint, signal, or exit)
-        before returning, ensuring GDB is in a stable state for subsequent commands.
+        Waits for the program to stop (at a breakpoint, signal, or exit) before
+        returning. The (gdb) prompt indicates GDB is ready for subsequent commands.
 
         Returns:
-            Dict with status and stopped notification details
+            Dict with status and execution result
         """
-        if not self.controller:
-            return {"status": "error", "message": "No active GDB session"}
-
-        try:
-            # Issue the continue command
-            responses = self.controller.write("-exec-continue", timeout_sec=1)
-
-            # Wait for the program to actually stop, passing initial responses
-            stopped_result = self._wait_for_stopped(timeout_sec=10.0, initial_responses=responses)
-
-            return {"status": "success", "command": "-exec-continue", "result": stopped_result}
-        except Exception as e:
-            logger.error(f"Continue execution failed: {e}")
-            return {"status": "error", "message": str(e)}
+        return self.execute_command("-exec-continue")
 
     def step(self) -> Dict[str, Any]:
         """
         Step into (single source line, entering functions).
 
-        This method waits for the step to complete before returning.
+        Waits for the step to complete before returning. The (gdb) prompt indicates
+        GDB is ready for subsequent commands.
 
         Returns:
-            Dict with status and stopped notification details
+            Dict with status and execution result
         """
-        if not self.controller:
-            return {"status": "error", "message": "No active GDB session"}
-
-        try:
-            # Issue the step command
-            responses = self.controller.write("-exec-step", timeout_sec=1)
-
-            # Wait for the step to complete, passing initial responses
-            stopped_result = self._wait_for_stopped(timeout_sec=5.0, initial_responses=responses)
-
-            return {"status": "success", "command": "-exec-step", "result": stopped_result}
-        except Exception as e:
-            logger.error(f"Step failed: {e}")
-            return {"status": "error", "message": str(e)}
+        return self.execute_command("-exec-step")
 
     def next(self) -> Dict[str, Any]:
         """
         Step over (next source line, not entering functions).
 
-        This method waits for the step to complete before returning.
+        Waits for the step to complete before returning. The (gdb) prompt indicates
+        GDB is ready for subsequent commands.
 
         Returns:
-            Dict with status and stopped notification details
+            Dict with status and execution result
         """
-        if not self.controller:
-            return {"status": "error", "message": "No active GDB session"}
-
-        try:
-            # Issue the next command
-            responses = self.controller.write("-exec-next", timeout_sec=1)
-
-            # Wait for the step to complete, passing initial responses
-            stopped_result = self._wait_for_stopped(timeout_sec=5.0, initial_responses=responses)
-
-            return {"status": "success", "command": "-exec-next", "result": stopped_result}
-        except Exception as e:
-            logger.error(f"Next failed: {e}")
-            return {"status": "error", "message": str(e)}
+        return self.execute_command("-exec-next")
 
     def interrupt(self) -> Dict[str, Any]:
         """
