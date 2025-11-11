@@ -36,16 +36,22 @@ That's it! No paths, no virtual environment management needed.
 
 ### Alternative: Using Virtual Environment
 
-**1. Run the setup script:**
+**1. Create and activate virtual environment:**
 ```bash
-./setup-venv.sh  # Linux/macOS
+python3 -m venv venv
+source venv/bin/activate  # Linux/macOS
 # or
-setup-venv.bat   # Windows
+venv\Scripts\activate     # Windows
 ```
 
-**2. Copy the configuration it outputs to your Claude Desktop config**
+**2. Install the package:**
+```bash
+pip install -e ".[dev]"
+```
 
-**3. Restart Claude Desktop**
+**3. Configure Claude Desktop with the full path to your venv Python**
+
+**4. Restart Claude Desktop**
 
 ---
 
@@ -181,20 +187,23 @@ git clone <repository-url> gdb-mcp
 cd gdb-mcp
 ```
 
-### Step 2: Run Setup Script
+### Step 2: Create Virtual Environment and Install
 
 **Linux/macOS:**
 ```bash
-chmod +x setup-venv.sh
-./setup-venv.sh
+python3 -m venv venv
+source venv/bin/activate
+pip install -e ".[dev]"
 ```
 
 **Windows (Command Prompt):**
 ```cmd
-setup-venv.bat
+python -m venv venv
+venv\Scripts\activate
+pip install -e ".[dev]"
 ```
 
-The script will create a virtual environment and install all dependencies.
+This will create a virtual environment and install all dependencies.
 
 ### Step 2.5: Verify Installation (Optional but Recommended)
 
@@ -257,7 +266,7 @@ If you see errors, check the Troubleshooting section below.
 }
 ```
 
-**Pro tip:** The setup script displays the exact configuration for your system. Just copy and paste!
+**Pro tip:** Use the absolute path from `pwd` (Linux/macOS) or `cd` (Windows) command to get the exact path.
 
 ### Step 4: Restart Claude Desktop
 
@@ -456,8 +465,7 @@ To update to a newer version:
 cd /path/to/gdb-mcp
 git pull
 source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -r requirements.txt
-pip install -e .
+pip install -e ".[dev]"  # Installs package with all dependencies
 ```
 
 Then restart Claude Desktop.
