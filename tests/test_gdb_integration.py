@@ -16,6 +16,7 @@ tests that interact with external processes.
 import pytest
 import tempfile
 import subprocess
+import os
 from pathlib import Path
 from gdb_mcp.gdb_interface import GDBSession
 
@@ -165,15 +166,16 @@ def test_run_and_hit_breakpoint(gdb_session, compiled_program):
     gdb_session.set_breakpoint("main")
 
     # Run the program (it should stop at main)
-    gdb_session.execute_command("-exec-run")
+    run_result = gdb_session.run()
+    assert run_result["status"] == "success"
 
-    # Get backtrace to verify we're at a breakpoint
+    # Get backtrace to verify we're at main
     backtrace = gdb_session.get_backtrace()
     assert backtrace["status"] == "success"
     assert backtrace["count"] > 0
-    # Verify we got frames (function names may be unreliable due to timing)
+    # Check that we're in main function (func might be "main", "main()", etc.)
     frames = backtrace["frames"]
-    assert len(frames) > 0
+    assert any("main" in frame.get("func", "") for frame in frames)
 
 
 @pytest.mark.integration
@@ -186,7 +188,7 @@ def test_step_through_functions(gdb_session, compiled_program):
     gdb_session.set_breakpoint("main")
 
     # Run to breakpoint
-    gdb_session.execute_command("-exec-run")
+    gdb_session.run()
 
     # Step a few times
     for _ in range(3):
@@ -209,7 +211,7 @@ def test_inspect_variables(gdb_session, compiled_program):
     gdb_session.set_breakpoint("add")
 
     # Run to breakpoint (stops at the add function)
-    gdb_session.execute_command("-exec-run")
+    gdb_session.run()
 
     # Step to ensure we're in the function body
     gdb_session.next()
@@ -230,7 +232,7 @@ def test_backtrace_across_functions(gdb_session, compiled_program):
     gdb_session.set_breakpoint("add")
 
     # Run to breakpoint (this will stop at the add function)
-    gdb_session.execute_command("-exec-run")
+    gdb_session.run()
 
     # Get backtrace
     backtrace = gdb_session.get_backtrace()
@@ -239,9 +241,11 @@ def test_backtrace_across_functions(gdb_session, compiled_program):
     # Should have at least 2 frames (add and its caller)
     assert backtrace["count"] >= 2, f"Expected at least 2 frames, got {backtrace['count']}"
 
-    # Verify we got frames
+    # Verify the call stack includes at least the add function
     frames = backtrace["frames"]
-    assert len(frames) >= 2  # At least 2 frames in the stack
+    frame_funcs = [f.get("func", "") for f in frames]
+    # Check if add is in the backtrace (with or without signature)
+    assert any("add" in func for func in frame_funcs if func)
 
 
 @pytest.mark.integration
@@ -254,7 +258,7 @@ def test_next_vs_step(gdb_session, compiled_program):
     gdb_session.set_breakpoint("main")
 
     # Run to breakpoint
-    gdb_session.execute_command("-exec-run")
+    gdb_session.run()
 
     # Use next() which should step over function calls
     # This should execute but stay in the same function
@@ -280,7 +284,7 @@ def test_evaluate_expressions(gdb_session, compiled_program):
     gdb_session.set_breakpoint("main")
 
     # Run to breakpoint
-    gdb_session.execute_command("-exec-run")
+    gdb_session.run()
 
     # Step a few times to get past variable declarations
     for _ in range(3):
@@ -303,7 +307,7 @@ def test_get_variables_in_frame(gdb_session, compiled_program):
     gdb_session.set_breakpoint("add")
 
     # Run to breakpoint
-    gdb_session.execute_command("-exec-run")
+    gdb_session.run()
 
     # Step to ensure we're in the function body
     gdb_session.next()
@@ -363,7 +367,7 @@ def test_temporary_breakpoint(gdb_session, compiled_program):
     assert bp_result["status"] == "success"
 
     # Run to hit the breakpoint
-    gdb_session.execute_command("-exec-run")
+    gdb_session.run()
 
     # After hitting a temporary breakpoint once, it should be removed
     # Continue and check breakpoint list
@@ -406,6 +410,9 @@ def test_cli_commands(gdb_session, compiled_program):
     assert "add" in output_lower or "main" in output_lower or "calculate" in output_lower
 
 
+# Integration tests for edge cases and error conditions
+
+
 @pytest.mark.integration
 def test_breakpoint_at_nonexistent_function(gdb_session, compiled_program):
     """Test setting breakpoint at a function that doesn't exist."""
@@ -445,3 +452,233 @@ def test_multiple_breakpoints_same_location(gdb_session, compiled_program):
     list_result = gdb_session.list_breakpoints()
     assert list_result["status"] == "success"
     assert list_result["count"] == 2
+
+
+# Integration tests for new features: breakpoint management
+
+
+@pytest.mark.integration
+def test_delete_breakpoint(gdb_session, compiled_program):
+    """Test deleting a breakpoint."""
+    gdb_session.start(program=compiled_program)
+
+    # Set a breakpoint
+    bp_result = gdb_session.set_breakpoint("main")
+    assert bp_result["status"] == "success"
+    bp_number = int(bp_result["breakpoint"]["number"])
+
+    # Set another breakpoint
+    bp2_result = gdb_session.set_breakpoint("add")
+    assert bp2_result["status"] == "success"
+
+    # Verify we have 2 breakpoints
+    list_result = gdb_session.list_breakpoints()
+    assert list_result["count"] == 2
+
+    # Delete the first breakpoint
+    delete_result = gdb_session.delete_breakpoint(bp_number)
+    assert delete_result["status"] == "success"
+
+    # Verify only 1 breakpoint remains
+    list_result = gdb_session.list_breakpoints()
+    assert list_result["count"] == 1
+    # Verify the remaining breakpoint is at add
+    remaining_bp = list_result["breakpoints"][0]
+    assert "add" in remaining_bp.get("func", "")
+
+
+@pytest.mark.integration
+def test_enable_disable_breakpoint(gdb_session, compiled_program):
+    """Test enabling and disabling a breakpoint."""
+    gdb_session.start(program=compiled_program)
+
+    # Set a breakpoint
+    bp_result = gdb_session.set_breakpoint("main")
+    assert bp_result["status"] == "success"
+    bp_number = int(bp_result["breakpoint"]["number"])
+
+    # Disable the breakpoint
+    disable_result = gdb_session.disable_breakpoint(bp_number)
+    assert disable_result["status"] == "success"
+
+    # Verify it's disabled
+    list_result = gdb_session.list_breakpoints()
+    assert list_result["count"] == 1
+    bp_info = list_result["breakpoints"][0]
+    assert bp_info["enabled"] == "n"
+
+    # Enable the breakpoint
+    enable_result = gdb_session.enable_breakpoint(bp_number)
+    assert enable_result["status"] == "success"
+
+    # Verify it's enabled
+    list_result = gdb_session.list_breakpoints()
+    assert list_result["count"] == 1
+    bp_info = list_result["breakpoints"][0]
+    assert bp_info["enabled"] == "y"
+
+
+@pytest.mark.integration
+def test_breakpoint_workflow(gdb_session, compiled_program):
+    """Test a complete breakpoint management workflow."""
+    gdb_session.start(program=compiled_program)
+
+    # Set multiple breakpoints
+    bp1 = gdb_session.set_breakpoint("main")
+    bp2 = gdb_session.set_breakpoint("add")
+    bp3 = gdb_session.set_breakpoint("multiply")
+    assert all(bp["status"] == "success" for bp in [bp1, bp2, bp3])
+
+    bp1_num = int(bp1["breakpoint"]["number"])
+    bp2_num = int(bp2["breakpoint"]["number"])
+    bp3_num = int(bp3["breakpoint"]["number"])
+
+    # Verify all 3 breakpoints exist
+    list_result = gdb_session.list_breakpoints()
+    assert list_result["count"] == 3
+
+    # Disable one breakpoint
+    gdb_session.disable_breakpoint(bp2_num)
+
+    # Delete one breakpoint
+    gdb_session.delete_breakpoint(bp3_num)
+
+    # Verify we have 2 breakpoints (one deleted)
+    list_result = gdb_session.list_breakpoints()
+    assert list_result["count"] == 2
+
+    # Verify the disabled breakpoint is still disabled
+    bp2_info = next((bp for bp in list_result["breakpoints"] if bp["number"] == str(bp2_num)), None)
+    assert bp2_info is not None
+    assert bp2_info["enabled"] == "n"
+
+
+# Integration tests for thread selection
+
+
+@pytest.mark.integration
+def test_get_threads(gdb_session, compiled_program):
+    """Test getting thread information."""
+    gdb_session.start(program=compiled_program)
+
+    # Set breakpoint at main
+    gdb_session.set_breakpoint("main")
+
+    # Run to breakpoint
+    gdb_session.run()
+
+    # Get threads
+    threads_result = gdb_session.get_threads()
+    assert threads_result["status"] == "success"
+    assert "threads" in threads_result
+    assert threads_result["count"] >= 1  # Should have at least the main thread
+    assert "current_thread_id" in threads_result
+
+
+@pytest.mark.integration
+def test_select_thread(gdb_session, compiled_program):
+    """Test selecting a thread."""
+    gdb_session.start(program=compiled_program)
+
+    # Set breakpoint at main
+    gdb_session.set_breakpoint("main")
+
+    # Run to breakpoint
+    gdb_session.run()
+
+    # Get threads
+    threads_result = gdb_session.get_threads()
+    assert threads_result["status"] == "success"
+    assert threads_result["count"] >= 1
+
+    # Get the current thread ID
+    current_thread_id = threads_result["current_thread_id"]
+    assert current_thread_id is not None
+
+    # Select the current thread (should succeed)
+    select_result = gdb_session.select_thread(int(current_thread_id))
+    assert select_result["status"] == "success"
+    assert select_result["thread_id"] == int(current_thread_id)
+
+
+# Integration tests for frame selection
+
+
+@pytest.mark.integration
+def test_get_frame_info(gdb_session, compiled_program):
+    """Test getting information about the current frame."""
+    gdb_session.start(program=compiled_program)
+
+    # Set breakpoint in add function
+    gdb_session.set_breakpoint("add")
+
+    # Run to breakpoint
+    gdb_session.run()
+
+    # Get frame info
+    frame_result = gdb_session.get_frame_info()
+    assert frame_result["status"] == "success"
+    assert "frame" in frame_result
+    frame = frame_result["frame"]
+    # Should have basic frame info like level
+    assert "level" in frame
+
+
+@pytest.mark.integration
+def test_select_frame(gdb_session, compiled_program):
+    """Test selecting a specific frame in the call stack."""
+    gdb_session.start(program=compiled_program)
+
+    # Set breakpoint in add function (called from calculate)
+    gdb_session.set_breakpoint("add")
+
+    # Run to breakpoint
+    gdb_session.run()
+
+    # Get backtrace to see how many frames we have
+    backtrace = gdb_session.get_backtrace()
+    assert backtrace["status"] == "success"
+    assert backtrace["count"] >= 2  # Should have at least add and its caller
+
+    # Select frame 0 (current frame - should be add)
+    select_result = gdb_session.select_frame(0)
+    assert select_result["status"] == "success"
+    assert select_result["frame_number"] == 0
+
+    # Select frame 1 (caller frame)
+    if backtrace["count"] >= 2:
+        select_result = gdb_session.select_frame(1)
+        assert select_result["status"] == "success"
+        assert select_result["frame_number"] == 1
+
+
+@pytest.mark.integration
+def test_frame_selection_and_variables(gdb_session, compiled_program):
+    """Test that frame selection affects variable inspection."""
+    gdb_session.start(program=compiled_program)
+
+    # Set breakpoint in add function
+    gdb_session.set_breakpoint("add")
+
+    # Run to breakpoint
+    gdb_session.run()
+
+    # Step to get into the function
+    gdb_session.next()
+
+    # Get backtrace
+    backtrace = gdb_session.get_backtrace()
+    assert backtrace["count"] >= 2
+
+    # Select frame 0 (add function)
+    gdb_session.select_frame(0)
+    vars_frame0 = gdb_session.get_variables(frame=0)
+    assert vars_frame0["status"] == "success"
+
+    # Select frame 1 (caller)
+    if backtrace["count"] >= 2:
+        gdb_session.select_frame(1)
+        vars_frame1 = gdb_session.get_variables(frame=1)
+        assert vars_frame1["status"] == "success"
+        # Variables should be different in different frames
+        # (though we can't guarantee the exact variable names)

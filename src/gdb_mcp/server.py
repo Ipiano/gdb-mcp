@@ -1,20 +1,21 @@
 """MCP Server for GDB debugging interface."""
 
 import asyncio
+import json
 import logging
+import os
 from typing import Any, Optional
 from mcp.server import Server
-from mcp.types import (
-    Tool,
-    TextContent,
-    ImageContent,
-    EmbeddedResource,
-)
+from mcp.types import Tool, TextContent
 from pydantic import BaseModel, Field
 from .gdb_interface import GDBSession
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+# Set up logging - use GDB_MCP_LOG_LEVEL environment variable
+log_level = os.environ.get("GDB_MCP_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, log_level, logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 # Global GDB session instance
@@ -37,11 +38,20 @@ class StartSessionArgs(BaseModel):
         description="Environment variables to set for the debugged program (e.g., {'LD_LIBRARY_PATH': '/custom/libs'})",
     )
     gdb_path: str = Field("gdb", description="Path to GDB executable (default: 'gdb')")
+    working_dir: Optional[str] = Field(
+        None,
+        description=(
+            "Working directory to use when starting GDB. "
+            "Use this when debugging programs that need to be run from a specific directory, "
+            "or when the program expects to find files (config, data, etc.) relative to its working directory. "
+            "GDB will be started in this directory, then the original directory is restored. "
+            "Example: If debugging a server that loads config from './config.json', set working_dir to the server's directory."
+        ),
+    )
 
 
 class ExecuteCommandArgs(BaseModel):
     command: str = Field(..., description="GDB command to execute")
-    timeout_sec: int = Field(5, description="Timeout in seconds")
 
 
 class GetBacktraceArgs(BaseModel):
@@ -68,6 +78,14 @@ class ThreadSelectArgs(BaseModel):
     thread_id: int = Field(..., description="Thread ID to select")
 
 
+class BreakpointNumberArgs(BaseModel):
+    number: int = Field(..., description="Breakpoint number")
+
+
+class FrameSelectArgs(BaseModel):
+    frame_number: int = Field(..., description="Frame number (0 is current/innermost frame)")
+
+
 # List available tools
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -81,8 +99,10 @@ async def list_tools() -> list[Tool]:
                 "Automatically detects and reports important warnings such as: "
                 "missing debug symbols (not compiled with -g), file not found, or invalid executable. "
                 "Check the 'warnings' field in the response for critical issues that may affect debugging. "
-                "Examples of init_commands: 'core-file /path/to/core', 'set sysroot /path', "
-                "'set solib-search-path /path'"
+                "Available parameters: program (executable path), args (program arguments), "
+                "init_commands (GDB commands like 'core-file /path/to/core', 'set sysroot /path'), "
+                "env (environment variables), gdb_path (GDB binary path), "
+                "working_dir (directory to run program from - use when program needs specific working directory)."
             ),
             inputSchema=StartSessionArgs.model_json_schema(),
         ),
@@ -122,12 +142,43 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="gdb_select_thread",
+            description=(
+                "Select a specific thread to make it the current thread. "
+                "After selecting a thread, subsequent commands like gdb_get_backtrace, "
+                "gdb_get_variables, and gdb_evaluate_expression will operate on this thread. "
+                "Use gdb_get_threads to see available thread IDs."
+            ),
+            inputSchema=ThreadSelectArgs.model_json_schema(),
+        ),
+        Tool(
             name="gdb_get_backtrace",
             description=(
                 "Get the stack backtrace for a specific thread or the current thread. "
                 "Shows function calls, file locations, and line numbers."
             ),
             inputSchema=GetBacktraceArgs.model_json_schema(),
+        ),
+        Tool(
+            name="gdb_select_frame",
+            description=(
+                "Select a specific stack frame to make it the current frame. "
+                "Frame 0 is the innermost (current) frame, higher numbers are outer frames. "
+                "After selecting a frame, commands like gdb_get_variables and gdb_evaluate_expression "
+                "will operate in the context of that frame. "
+                "Use gdb_get_backtrace to see available frames and their numbers."
+            ),
+            inputSchema=FrameSelectArgs.model_json_schema(),
+        ),
+        Tool(
+            name="gdb_get_frame_info",
+            description=(
+                "Get information about the current stack frame. "
+                "Returns details about the currently selected frame including function name, "
+                "file location, line number, and address. "
+                "Use gdb_select_frame to change the current frame first if needed."
+            ),
+            inputSchema={"type": "object", "properties": {}, "required": []},
         ),
         Tool(
             name="gdb_set_breakpoint",
@@ -153,6 +204,32 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {},
             },
+        ),
+        Tool(
+            name="gdb_delete_breakpoint",
+            description=(
+                "Delete a breakpoint by its number. "
+                "Use gdb_list_breakpoints to see breakpoint numbers. "
+                "Once deleted, the breakpoint cannot be recovered."
+            ),
+            inputSchema=BreakpointNumberArgs.model_json_schema(),
+        ),
+        Tool(
+            name="gdb_enable_breakpoint",
+            description=(
+                "Enable a previously disabled breakpoint by its number. "
+                "Enabled breakpoints will pause execution when hit."
+            ),
+            inputSchema=BreakpointNumberArgs.model_json_schema(),
+        ),
+        Tool(
+            name="gdb_disable_breakpoint",
+            description=(
+                "Disable a breakpoint by its number without deleting it. "
+                "Disabled breakpoints are not hit but remain in the breakpoint list. "
+                "Use gdb_enable_breakpoint to re-enable it later."
+            ),
+            inputSchema=BreakpointNumberArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_continue",
@@ -252,11 +329,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 init_commands=args.init_commands,
                 env=args.env,
                 gdb_path=args.gdb_path,
+                working_dir=args.working_dir,
             )
 
         elif name == "gdb_execute_command":
             args = ExecuteCommandArgs(**arguments)
-            result = gdb_session.execute_command(command=args.command, timeout_sec=args.timeout_sec)
+            result = gdb_session.execute_command(command=args.command)
 
         elif name == "gdb_get_status":
             result = gdb_session.get_status()
@@ -264,9 +342,20 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         elif name == "gdb_get_threads":
             result = gdb_session.get_threads()
 
+        elif name == "gdb_select_thread":
+            args = ThreadSelectArgs(**arguments)
+            result = gdb_session.select_thread(thread_id=args.thread_id)
+
         elif name == "gdb_get_backtrace":
             args = GetBacktraceArgs(**arguments)
             result = gdb_session.get_backtrace(thread_id=args.thread_id, max_frames=args.max_frames)
+
+        elif name == "gdb_select_frame":
+            args = FrameSelectArgs(**arguments)
+            result = gdb_session.select_frame(frame_number=args.frame_number)
+
+        elif name == "gdb_get_frame_info":
+            result = gdb_session.get_frame_info()
 
         elif name == "gdb_set_breakpoint":
             args = SetBreakpointArgs(**arguments)
@@ -276,6 +365,18 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         elif name == "gdb_list_breakpoints":
             result = gdb_session.list_breakpoints()
+
+        elif name == "gdb_delete_breakpoint":
+            args = BreakpointNumberArgs(**arguments)
+            result = gdb_session.delete_breakpoint(number=args.number)
+
+        elif name == "gdb_enable_breakpoint":
+            args = BreakpointNumberArgs(**arguments)
+            result = gdb_session.enable_breakpoint(number=args.number)
+
+        elif name == "gdb_disable_breakpoint":
+            args = BreakpointNumberArgs(**arguments)
+            result = gdb_session.disable_breakpoint(number=args.number)
 
         elif name == "gdb_continue":
             result = gdb_session.continue_execution()
@@ -307,16 +408,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = {"status": "error", "message": f"Unknown tool: {name}"}
 
         # Format result as text
-        import json
-
         result_text = json.dumps(result, indent=2)
 
         return [TextContent(type="text", text=result_text)]
 
     except Exception as e:
         logger.error(f"Error executing tool {name}: {e}", exc_info=True)
-        import json
-
         error_result = {"status": "error", "message": str(e), "tool": name}
         return [TextContent(type="text", text=json.dumps(error_result, indent=2))]
 
