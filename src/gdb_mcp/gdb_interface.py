@@ -110,7 +110,8 @@ class GDBSession:
                     if "file" in cmd.lower() or "core-file" in cmd.lower():
                         self.target_loaded = True
 
-            if program and not init_commands:
+            # Set target_loaded if a program was specified
+            if program:
                 self.target_loaded = True
 
             self.is_running = True
