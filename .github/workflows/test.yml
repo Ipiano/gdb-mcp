@@ -28,7 +28,7 @@ jobs:
 
     - name: Run unit tests
       run: |
-        pytest tests/ -v --tb=short
+        pytest tests/ -v --tb=short -n auto
 
     - name: Check Python syntax
       run: |
