@@ -1,5 +1,6 @@
 """Unit tests for GDB interface."""
 
+import os
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from gdb_mcp.gdb_interface import GDBSession
@@ -137,6 +138,66 @@ class TestGDBSessionWithMock:
 
         assert command[0] == "/usr/local/bin/gdb-custom"
         assert "--interpreter=mi" in command
+        assert result["status"] == "success"
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    @patch.dict(os.environ, {"GDB_PATH": "/custom/path/to/gdb"})
+    def test_start_session_with_gdb_path_env_var(self, mock_controller_class):
+        """Test session start uses GDB_PATH environment variable when gdb_path is not specified."""
+        mock_controller = MagicMock()
+        mock_controller_class.return_value = mock_controller
+
+        session = GDBSession()
+
+        # Mock the initialization check
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [{"type": "result", "message": "done", "token": 1000}],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            # Don't specify gdb_path - should use environment variable
+            result = session.start(program="/bin/ls")
+
+        # Verify GdbController was called with GDB_PATH from environment
+        call_args = mock_controller_class.call_args
+        command = call_args[1]["command"]
+
+        assert command[0] == "/custom/path/to/gdb"
+        assert "--interpreter=mi" in command
+        assert result["status"] == "success"
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    @patch.dict(os.environ, {"GDB_PATH": "/env/gdb"})
+    def test_start_session_explicit_path_overrides_env_var(self, mock_controller_class):
+        """Test that explicit gdb_path parameter overrides GDB_PATH environment variable."""
+        mock_controller = MagicMock()
+        mock_controller_class.return_value = mock_controller
+
+        session = GDBSession()
+
+        # Mock the initialization check
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [{"type": "result", "message": "done", "token": 1000}],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            # Explicitly specify gdb_path - should override environment variable
+            result = session.start(program="/bin/ls", gdb_path="/explicit/gdb")
+
+        # Verify GdbController was called with explicit path, not environment variable
+        call_args = mock_controller_class.call_args
+        command = call_args[1]["command"]
+
+        assert command[0] == "/explicit/gdb"
+        assert command[0] != "/env/gdb"
         assert result["status"] == "success"
 
     @patch("gdb_mcp.gdb_interface.GdbController")

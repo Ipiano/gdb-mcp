@@ -31,7 +31,7 @@ class GDBSession:
         args: Optional[List[str]] = None,
         init_commands: Optional[List[str]] = None,
         env: Optional[Dict[str, str]] = None,
-        gdb_path: str = "gdb",
+        gdb_path: Optional[str] = None,
         working_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
@@ -42,7 +42,7 @@ class GDBSession:
             args: Command-line arguments for the program
             init_commands: List of GDB commands to run on startup (e.g., loading core dumps)
             env: Environment variables to set for the debugged program
-            gdb_path: Path to GDB executable
+            gdb_path: Path to GDB executable (default: from GDB_PATH env var or 'gdb')
             working_dir: Working directory to use when starting GDB (changes directory
                         before spawning GDB process, then restores it)
 
@@ -60,6 +60,10 @@ class GDBSession:
         """
         if self.controller:
             return {"status": "error", "message": "Session already running. Stop it first."}
+
+        # Determine GDB path: explicit parameter > environment variable > default
+        if gdb_path is None:
+            gdb_path = os.environ.get("GDB_PATH", "gdb")
 
         # Save current working directory if we need to change it
         # This will be restored when stop() is called

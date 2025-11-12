@@ -23,7 +23,9 @@ class TestStartSessionArgs:
         assert args.args is None
         assert args.init_commands is None
         assert args.env is None
-        assert args.gdb_path == "gdb"  # Default value
+        assert (
+            args.gdb_path is None
+        )  # Default to None, actual default determined by GDB_PATH env var or "gdb"
 
     def test_full_args(self):
         """Test creating StartSessionArgs with all arguments."""

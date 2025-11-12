@@ -37,7 +37,9 @@ class StartSessionArgs(BaseModel):
         None,
         description="Environment variables to set for the debugged program (e.g., {'LD_LIBRARY_PATH': '/custom/libs'})",
     )
-    gdb_path: str = Field("gdb", description="Path to GDB executable (default: 'gdb')")
+    gdb_path: Optional[str] = Field(
+        None, description="Path to GDB executable (default: from GDB_PATH env var or 'gdb')"
+    )
     working_dir: Optional[str] = Field(
         None,
         description=(

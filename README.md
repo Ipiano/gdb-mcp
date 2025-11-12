@@ -64,6 +64,40 @@ Add this to your Claude Desktop configuration file:
 
 **For other installation methods and MCP clients, see [INSTALL.md](INSTALL.md#step-5-configure-your-mcp-client).**
 
+## Environment Variables
+
+The GDB MCP Server supports the following environment variables:
+
+### `GDB_PATH`
+
+Specify the path to the GDB executable to use. This is useful when:
+- You have multiple GDB versions installed
+- GDB is installed in a non-standard location
+- You want to use a custom or patched GDB build
+
+**Default**: `gdb` (resolved via system PATH)
+
+**Example**:
+```bash
+export GDB_PATH=/usr/local/bin/gdb-13.2
+gdb-mcp-server
+```
+
+**Note**: The `gdb_path` parameter in the `gdb_start_session` tool overrides this environment variable if both are specified.
+
+### `GDB_MCP_LOG_LEVEL`
+
+Set the logging level for the server.
+
+**Default**: `INFO`
+**Options**: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
+
+**Example**:
+```bash
+export GDB_MCP_LOG_LEVEL=DEBUG
+gdb-mcp-server
+```
+
 ## Available Tools
 
 The GDB MCP Server provides 21 tools for controlling GDB debugging sessions:
