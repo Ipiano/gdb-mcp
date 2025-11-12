@@ -62,4 +62,3 @@ jobs:
     - name: Type check with mypy
       run: |
         mypy src/gdb_mcp/ --ignore-missing-imports
-      continue-on-error: true  # Don't fail on mypy errors initially

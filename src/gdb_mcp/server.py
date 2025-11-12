@@ -333,8 +333,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             )
 
         elif name == "gdb_execute_command":
-            args = ExecuteCommandArgs(**arguments)
-            result = gdb_session.execute_command(command=args.command)
+            exec_args: ExecuteCommandArgs = ExecuteCommandArgs(**arguments)
+            result = gdb_session.execute_command(command=exec_args.command)
 
         elif name == "gdb_get_status":
             result = gdb_session.get_status()
@@ -343,40 +343,42 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = gdb_session.get_threads()
 
         elif name == "gdb_select_thread":
-            args = ThreadSelectArgs(**arguments)
-            result = gdb_session.select_thread(thread_id=args.thread_id)
+            thread_args: ThreadSelectArgs = ThreadSelectArgs(**arguments)
+            result = gdb_session.select_thread(thread_id=thread_args.thread_id)
 
         elif name == "gdb_get_backtrace":
-            args = GetBacktraceArgs(**arguments)
-            result = gdb_session.get_backtrace(thread_id=args.thread_id, max_frames=args.max_frames)
+            backtrace_args: GetBacktraceArgs = GetBacktraceArgs(**arguments)
+            result = gdb_session.get_backtrace(
+                thread_id=backtrace_args.thread_id, max_frames=backtrace_args.max_frames
+            )
 
         elif name == "gdb_select_frame":
-            args = FrameSelectArgs(**arguments)
-            result = gdb_session.select_frame(frame_number=args.frame_number)
+            frame_args: FrameSelectArgs = FrameSelectArgs(**arguments)
+            result = gdb_session.select_frame(frame_number=frame_args.frame_number)
 
         elif name == "gdb_get_frame_info":
             result = gdb_session.get_frame_info()
 
         elif name == "gdb_set_breakpoint":
-            args = SetBreakpointArgs(**arguments)
+            bp_args: SetBreakpointArgs = SetBreakpointArgs(**arguments)
             result = gdb_session.set_breakpoint(
-                location=args.location, condition=args.condition, temporary=args.temporary
+                location=bp_args.location, condition=bp_args.condition, temporary=bp_args.temporary
             )
 
         elif name == "gdb_list_breakpoints":
             result = gdb_session.list_breakpoints()
 
         elif name == "gdb_delete_breakpoint":
-            args = BreakpointNumberArgs(**arguments)
-            result = gdb_session.delete_breakpoint(number=args.number)
+            del_bp_args: BreakpointNumberArgs = BreakpointNumberArgs(**arguments)
+            result = gdb_session.delete_breakpoint(number=del_bp_args.number)
 
         elif name == "gdb_enable_breakpoint":
-            args = BreakpointNumberArgs(**arguments)
-            result = gdb_session.enable_breakpoint(number=args.number)
+            en_bp_args: BreakpointNumberArgs = BreakpointNumberArgs(**arguments)
+            result = gdb_session.enable_breakpoint(number=en_bp_args.number)
 
         elif name == "gdb_disable_breakpoint":
-            args = BreakpointNumberArgs(**arguments)
-            result = gdb_session.disable_breakpoint(number=args.number)
+            dis_bp_args: BreakpointNumberArgs = BreakpointNumberArgs(**arguments)
+            result = gdb_session.disable_breakpoint(number=dis_bp_args.number)
 
         elif name == "gdb_continue":
             result = gdb_session.continue_execution()
@@ -391,12 +393,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             result = gdb_session.interrupt()
 
         elif name == "gdb_evaluate_expression":
-            args = EvaluateExpressionArgs(**arguments)
-            result = gdb_session.evaluate_expression(args.expression)
+            eval_args: EvaluateExpressionArgs = EvaluateExpressionArgs(**arguments)
+            result = gdb_session.evaluate_expression(eval_args.expression)
 
         elif name == "gdb_get_variables":
-            args = GetVariablesArgs(**arguments)
-            result = gdb_session.get_variables(thread_id=args.thread_id, frame=args.frame)
+            var_args: GetVariablesArgs = GetVariablesArgs(**arguments)
+            result = gdb_session.get_variables(thread_id=var_args.thread_id, frame=var_args.frame)
 
         elif name == "gdb_get_registers":
             result = gdb_session.get_registers()

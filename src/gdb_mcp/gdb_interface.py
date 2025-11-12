@@ -109,7 +109,7 @@ class GDBSession:
                     except:
                         pass  # Best effort cleanup
                     self.controller = None
-                error_response = {
+                error_response: Dict[str, Any] = {
                     "status": "error",
                     "message": f"GDB failed to initialize: {error_msg}",
                 }
@@ -340,8 +340,8 @@ class GDBSession:
         # Read responses until we see the (gdb) prompt
         # Timeout is based on inactivity, not total elapsed time
         # As long as GDB keeps producing output, we keep waiting
-        command_responses = []
-        async_notifications = []
+        command_responses: List[Dict[str, Any]] = []
+        async_notifications: List[Dict[str, Any]] = []
         start_time = time.time()
         last_activity_time = start_time  # Track when we last received output
         last_alive_check = start_time
