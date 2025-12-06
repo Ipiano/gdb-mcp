@@ -1057,10 +1057,14 @@ class GDBSession:
         """
         # Switch thread if needed
         if thread_id is not None:
-            self.execute_command(f"-thread-select {thread_id}")
+            thread_result = self.execute_command(f"-thread-select {thread_id}")
+            if thread_result.get("status") == "error":
+                return thread_result
 
         # Select frame
-        self.execute_command(f"-stack-select-frame {frame}")
+        frame_result = self.execute_command(f"-stack-select-frame {frame}")
+        if frame_result.get("status") == "error":
+            return frame_result
 
         # Get variables
         result = self.execute_command("-stack-list-variables --simple-values")
