@@ -251,6 +251,13 @@ class GDBSession:
 
         except Exception as e:
             logger.error(f"Failed to start GDB session: {e}")
+            # Clean up controller if it was created
+            if self.controller:
+                try:
+                    self.controller.exit()
+                except Exception:
+                    pass
+                self.controller = None
             # If session failed to start, restore working directory immediately
             if self.original_cwd:
                 os.chdir(self.original_cwd)
