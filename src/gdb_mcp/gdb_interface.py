@@ -9,6 +9,19 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Commands that allow arbitrary code execution and should be blocked in execute_command
+# Users must use the dedicated execute_shell or execute_python methods instead
+DANGEROUS_COMMAND_PREFIXES = (
+    "shell ",
+    "shell\t",
+    "!",
+    "python ",
+    "python\t",
+    "python-interactive",
+    "pi ",
+    "pi\t",
+)
+
 
 class GDBSession:
     """
@@ -536,6 +549,21 @@ class GDBSession:
                 "message": "GDB process has exited - cannot execute command",
                 "command": command,
             }
+
+        # Block dangerous commands that allow arbitrary code execution
+        # Users must use execute_shell() or execute_python() instead
+        cmd_stripped = command.strip().lower()
+        for prefix in DANGEROUS_COMMAND_PREFIXES:
+            if cmd_stripped.startswith(prefix) or cmd_stripped == prefix.strip():
+                return {
+                    "status": "error",
+                    "message": (
+                        f"Command '{prefix.strip()}' is not allowed via execute_command. "
+                        "Use gdb_execute_shell or gdb_execute_python tools instead for "
+                        "security-sensitive operations."
+                    ),
+                    "command": command,
+                }
 
         # Detect if this is a CLI command (doesn't start with '-')
         # CLI commands need to be wrapped with -interpreter-exec
@@ -1133,4 +1161,102 @@ class GDBSession:
             "is_running": self.is_running,
             "target_loaded": self.target_loaded,
             "has_controller": self.controller is not None,
+        }
+
+    def execute_shell(self, command: str, timeout_sec: int = 30) -> Dict[str, Any]:
+        """
+        Execute a shell command via GDB's shell command.
+
+        This is a privileged operation that allows arbitrary shell command execution.
+        It is separated from execute_command to enable granular permission control
+        in MCP clients.
+
+        Args:
+            command: Shell command to execute
+
+        Returns:
+            Dict with command output
+        """
+        if not self.controller:
+            return {"status": "error", "message": "No active GDB session"}
+
+        if not self._is_gdb_alive():
+            return {
+                "status": "error",
+                "message": "GDB process has exited - cannot execute command",
+            }
+
+        # Execute via GDB's shell command, bypassing the dangerous command check
+        # Escape backslashes and quotes in the command
+        escaped_command = command.replace("\\", "\\\\").replace('"', '\\"')
+        mi_command = f'-interpreter-exec console "shell {escaped_command}"'
+
+        result = self._send_command_and_wait_for_prompt(mi_command, timeout_sec)
+
+        if "error" in result:
+            return {"status": "error", "message": result["error"], "command": command}
+
+        if result.get("timed_out"):
+            return {
+                "status": "error",
+                "message": f"Timeout waiting for shell command after {timeout_sec}s",
+                "command": command,
+            }
+
+        parsed = self._parse_responses(result.get("command_responses", []))
+        console_output = "".join(parsed.get("console", []))
+
+        return {
+            "status": "success",
+            "command": command,
+            "output": console_output.strip() if console_output else "(no output)",
+        }
+
+    def execute_python(self, code: str, timeout_sec: int = 30) -> Dict[str, Any]:
+        """
+        Execute Python code via GDB's python command.
+
+        This is a privileged operation that allows arbitrary Python code execution
+        within GDB's Python interpreter. It is separated from execute_command to
+        enable granular permission control in MCP clients.
+
+        Args:
+            code: Python code to execute
+
+        Returns:
+            Dict with execution output
+        """
+        if not self.controller:
+            return {"status": "error", "message": "No active GDB session"}
+
+        if not self._is_gdb_alive():
+            return {
+                "status": "error",
+                "message": "GDB process has exited - cannot execute command",
+            }
+
+        # Execute via GDB's python command, bypassing the dangerous command check
+        # Escape backslashes and quotes in the code
+        escaped_code = code.replace("\\", "\\\\").replace('"', '\\"')
+        mi_command = f'-interpreter-exec console "python {escaped_code}"'
+
+        result = self._send_command_and_wait_for_prompt(mi_command, timeout_sec)
+
+        if "error" in result:
+            return {"status": "error", "message": result["error"], "code": code}
+
+        if result.get("timed_out"):
+            return {
+                "status": "error",
+                "message": f"Timeout waiting for python command after {timeout_sec}s",
+                "code": code,
+            }
+
+        parsed = self._parse_responses(result.get("command_responses", []))
+        console_output = "".join(parsed.get("console", []))
+
+        return {
+            "status": "success",
+            "code": code,
+            "output": console_output.strip() if console_output else "(no output)",
         }

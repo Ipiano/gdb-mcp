@@ -849,3 +849,175 @@ class TestErrorHandling:
         assert result.get("fatal") is True
         # Session should be cleaned up
         assert session.controller is None
+
+
+class TestDangerousCommandBlocking:
+    """Test cases for blocking dangerous commands in execute_command."""
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_shell_command_blocked(self, mock_controller_class):
+        """Test that shell commands are blocked in execute_command."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        result = session.execute_command("shell ls -la")
+
+        assert result["status"] == "error"
+        assert "not allowed" in result["message"]
+        assert "gdb_execute_shell" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_bang_command_blocked(self, mock_controller_class):
+        """Test that ! commands are blocked in execute_command."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        result = session.execute_command("!whoami")
+
+        assert result["status"] == "error"
+        assert "not allowed" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_python_command_blocked(self, mock_controller_class):
+        """Test that python commands are blocked in execute_command."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        result = session.execute_command("python print('hello')")
+
+        assert result["status"] == "error"
+        assert "not allowed" in result["message"]
+        assert "gdb_execute_python" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_python_interactive_blocked(self, mock_controller_class):
+        """Test that python-interactive is blocked in execute_command."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        result = session.execute_command("python-interactive")
+
+        assert result["status"] == "error"
+        assert "not allowed" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_pi_command_blocked(self, mock_controller_class):
+        """Test that pi (python-interactive alias) is blocked."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        result = session.execute_command("pi print('test')")
+
+        assert result["status"] == "error"
+        assert "not allowed" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_case_insensitive_blocking(self, mock_controller_class):
+        """Test that blocking is case-insensitive."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        result = session.execute_command("SHELL ls")
+
+        assert result["status"] == "error"
+        assert "not allowed" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_safe_commands_allowed(self, mock_controller_class):
+        """Test that safe commands are still allowed."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        # Mock the internal method to return success
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [
+                    {"type": "console", "payload": "Breakpoint 1\n"},
+                    {"type": "result", "payload": None, "token": 1000},
+                ],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            result = session.execute_command("info breakpoints")
+
+        assert result["status"] == "success"
+
+
+class TestExecuteShell:
+    """Test cases for the execute_shell method."""
+
+    def test_execute_shell_no_session(self):
+        """Test execute_shell when no session is running."""
+        session = GDBSession()
+        result = session.execute_shell("ls")
+        assert result["status"] == "error"
+        assert "No active GDB session" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_execute_shell_success(self, mock_controller_class):
+        """Test successful shell command execution."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [
+                    {"type": "console", "payload": "file1.txt\nfile2.txt\n"},
+                    {"type": "result", "payload": None, "token": 1000},
+                ],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            result = session.execute_shell("ls")
+
+        assert result["status"] == "success"
+        assert "file1.txt" in result["output"]
+
+
+class TestExecutePython:
+    """Test cases for the execute_python method."""
+
+    def test_execute_python_no_session(self):
+        """Test execute_python when no session is running."""
+        session = GDBSession()
+        result = session.execute_python("print('hello')")
+        assert result["status"] == "error"
+        assert "No active GDB session" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_execute_python_success(self, mock_controller_class):
+        """Test successful Python code execution."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [
+                    {"type": "console", "payload": "hello world\n"},
+                    {"type": "result", "payload": None, "token": 1000},
+                ],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            result = session.execute_python("print('hello world')")
+
+        assert result["status"] == "success"
+        assert "hello world" in result["output"]

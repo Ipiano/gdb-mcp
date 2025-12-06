@@ -1,7 +1,6 @@
 """Unit tests for MCP server."""
 
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
 from pydantic import ValidationError
 from gdb_mcp.server import (
     StartSessionArgs,
@@ -131,3 +130,39 @@ class TestGetVariablesArgs:
         args = GetVariablesArgs(thread_id=3, frame=2)
         assert args.thread_id == 3
         assert args.frame == 2
+
+
+class TestExecuteShellArgs:
+    """Test cases for ExecuteShellArgs model."""
+
+    def test_command_required(self):
+        """Test that command is required."""
+        from gdb_mcp.server import ExecuteShellArgs
+
+        with pytest.raises(ValidationError):
+            ExecuteShellArgs()
+
+    def test_command_arg(self):
+        """Test command argument."""
+        from gdb_mcp.server import ExecuteShellArgs
+
+        args = ExecuteShellArgs(command="ls -la")
+        assert args.command == "ls -la"
+
+
+class TestExecutePythonArgs:
+    """Test cases for ExecutePythonArgs model."""
+
+    def test_code_required(self):
+        """Test that code is required."""
+        from gdb_mcp.server import ExecutePythonArgs
+
+        with pytest.raises(ValidationError):
+            ExecutePythonArgs()
+
+    def test_code_arg(self):
+        """Test code argument."""
+        from gdb_mcp.server import ExecutePythonArgs
+
+        args = ExecutePythonArgs(code="print('hello')")
+        assert args.code == "print('hello')"

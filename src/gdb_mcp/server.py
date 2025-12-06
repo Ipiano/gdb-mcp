@@ -88,6 +88,14 @@ class FrameSelectArgs(BaseModel):
     frame_number: int = Field(..., description="Frame number (0 is current/innermost frame)")
 
 
+class ExecuteShellArgs(BaseModel):
+    command: str = Field(..., description="Shell command to execute")
+
+
+class ExecutePythonArgs(BaseModel):
+    code: str = Field(..., description="Python code to execute in GDB's Python interpreter")
+
+
 # List available tools
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -314,6 +322,29 @@ async def list_tools() -> list[Tool]:
                 "properties": {},
             },
         ),
+        Tool(
+            name="gdb_execute_shell",
+            description=(
+                "Execute a shell command via GDB. "
+                "WARNING: This is a privileged operation that allows arbitrary shell command "
+                "execution on the system. Use with caution. "
+                "This tool is separated from gdb_execute_command to enable granular permission "
+                "control - MCP clients can allow basic GDB commands while restricting shell access."
+            ),
+            inputSchema=ExecuteShellArgs.model_json_schema(),
+        ),
+        Tool(
+            name="gdb_execute_python",
+            description=(
+                "Execute Python code in GDB's embedded Python interpreter. "
+                "WARNING: This is a privileged operation that allows arbitrary Python code "
+                "execution. Use with caution. "
+                "This tool is separated from gdb_execute_command to enable granular permission "
+                "control - MCP clients can allow basic GDB commands while restricting Python access. "
+                "Useful for advanced GDB scripting and automation."
+            ),
+            inputSchema=ExecutePythonArgs.model_json_schema(),
+        ),
     ]
 
 
@@ -407,6 +438,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         elif name == "gdb_stop_session":
             result = gdb_session.stop()
+
+        elif name == "gdb_execute_shell":
+            shell_args: ExecuteShellArgs = ExecuteShellArgs(**arguments)
+            result = gdb_session.execute_shell(command=shell_args.command)
+
+        elif name == "gdb_execute_python":
+            python_args: ExecutePythonArgs = ExecutePythonArgs(**arguments)
+            result = gdb_session.execute_python(code=python_args.code)
 
         else:
             result = {"status": "error", "message": f"Unknown tool: {name}"}
