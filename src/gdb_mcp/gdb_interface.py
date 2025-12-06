@@ -3,11 +3,24 @@
 import os
 import signal
 import subprocess
+import time
 from typing import Optional, List, Dict, Any
 from pygdbmi.gdbcontroller import GdbController
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Timeout constants (in seconds)
+DEFAULT_TIMEOUT_SEC = 30
+FILE_LOAD_TIMEOUT_SEC = 300  # 5 minutes for loading core/executable files
+INTERRUPT_RESPONSE_TIMEOUT_SEC = 2
+POLL_TIMEOUT_SEC = 0.1
+INIT_COMMAND_DELAY_SEC = 0.5
+INTERRUPT_SETTLE_TIME_SEC = 0.1
+
+# Other constants
+INITIAL_COMMAND_TOKEN = 1000
+DEFAULT_MAX_BACKTRACE_FRAMES = 100
 
 
 class GDBSession:
@@ -23,7 +36,7 @@ class GDBSession:
         self.is_running = False
         self.target_loaded = False
         self.original_cwd: Optional[str] = None  # Store original working directory
-        self._command_token = 1000  # Token counter for GDB/MI commands
+        self._command_token = INITIAL_COMMAND_TOKEN
 
     def start(
         self,
@@ -101,7 +114,9 @@ class GDBSession:
             # This ensures GDB has completed initialization before we send real commands
             # Timeout is based on inactivity - as long as GDB produces output, we wait
             logger.debug("Waiting for GDB initialization to complete...")
-            ready_check = self._send_command_and_wait_for_prompt("-gdb-version", timeout_sec=30)
+            ready_check = self._send_command_and_wait_for_prompt(
+                "-gdb-version", timeout_sec=DEFAULT_TIMEOUT_SEC
+            )
 
             if "error" in ready_check or ready_check.get("timed_out"):
                 error_msg = ready_check.get("error", "Timeout waiting for GDB to initialize")
@@ -148,12 +163,12 @@ class GDBSession:
                         # Use longer timeout for core-file and file commands
                         # Loading large core dumps can take several minutes
                         if "core-file" in cmd.lower() or cmd.lower().startswith("file "):
-                            timeout = 300  # 5 minutes for loading core/executable files
+                            timeout = FILE_LOAD_TIMEOUT_SEC
                             logger.info(
                                 f"Using extended timeout ({timeout}s) for file loading command"
                             )
                         else:
-                            timeout = 30  # Default timeout
+                            timeout = DEFAULT_TIMEOUT_SEC
 
                         result = self.execute_command(cmd, timeout_sec=timeout)
                         init_output.append(result)
@@ -161,9 +176,7 @@ class GDBSession:
                         # Give GDB time to stabilize after core-file commands
                         # This helps prevent crashes when GDB encounters warnings/errors
                         if "core-file" in cmd.lower():
-                            import time
-
-                            time.sleep(0.5)
+                            time.sleep(INIT_COMMAND_DELAY_SEC)
                             logger.debug("Waiting for GDB to stabilize after core-file command")
 
                         # Check if command failed
@@ -295,7 +308,7 @@ class GDBSession:
             return True
 
     def _send_command_and_wait_for_prompt(
-        self, command: str, timeout_sec: float = 30.0
+        self, command: str, timeout_sec: float = DEFAULT_TIMEOUT_SEC
     ) -> Dict[str, Any]:
         """
         Send a GDB/MI command with a token and wait for the (gdb) prompt.
@@ -399,7 +412,7 @@ class GDBSession:
             try:
                 # Try to get responses with a short timeout
                 responses = self.controller.get_gdb_response(
-                    timeout_sec=0.1, raise_error_on_timeout=False
+                    timeout_sec=POLL_TIMEOUT_SEC, raise_error_on_timeout=False
                 )
 
                 if not responses:
@@ -509,7 +522,9 @@ class GDBSession:
             "timed_out": True,
         }
 
-    def execute_command(self, command: str, timeout_sec: int = 30) -> Dict[str, Any]:
+    def execute_command(
+        self, command: str, timeout_sec: int = DEFAULT_TIMEOUT_SEC
+    ) -> Dict[str, Any]:
         """
         Execute a GDB command and return the parsed response.
 
@@ -707,7 +722,7 @@ class GDBSession:
         }
 
     def get_backtrace(
-        self, thread_id: Optional[int] = None, max_frames: int = 100
+        self, thread_id: Optional[int] = None, max_frames: int = DEFAULT_MAX_BACKTRACE_FRAMES
     ) -> Dict[str, Any]:
         """
         Get the stack backtrace for a specific thread or the current thread.
@@ -1014,12 +1029,10 @@ class GDBSession:
             os.kill(self.controller.gdb_process.pid, signal.SIGINT)
 
             # Give GDB a moment to process the interrupt
-            import time
-
-            time.sleep(0.1)
+            time.sleep(INTERRUPT_SETTLE_TIME_SEC)
 
             # Get the response
-            responses = self.controller.get_gdb_response(timeout_sec=2)
+            responses = self.controller.get_gdb_response(timeout_sec=INTERRUPT_RESPONSE_TIMEOUT_SEC)
             result = self._parse_responses(responses)
 
             return {
