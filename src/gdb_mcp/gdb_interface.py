@@ -213,8 +213,8 @@ class GDBSession:
             env_output = []
             if env:
                 for var_name, var_value in env.items():
-                    # Escape quotes in the value
-                    escaped_value = var_value.replace('"', '\\"')
+                    # Escape backslashes and quotes in the value
+                    escaped_value = var_value.replace("\\", "\\\\").replace('"', '\\"')
                     env_cmd = f"set environment {var_name} {escaped_value}"
                     result = self.execute_command(env_cmd)
                     env_output.append(result)
@@ -536,8 +536,8 @@ class GDBSession:
         actual_command = command
 
         if is_cli_command:
-            # Escape quotes in the command
-            escaped_command = command.replace('"', '\\"')
+            # Escape backslashes and quotes in the command
+            escaped_command = command.replace("\\", "\\\\").replace('"', '\\"')
             actual_command = f'-interpreter-exec console "{escaped_command}"'
             logger.debug(f"Wrapping CLI command: {command} -> {actual_command}")
 
@@ -800,7 +800,9 @@ class GDBSession:
             cmd_parts.append("-t")
 
         if condition:
-            cmd_parts.extend(["-c", f'"{condition}"'])
+            # Escape backslashes and quotes in the condition
+            escaped_condition = condition.replace("\\", "\\\\").replace('"', '\\"')
+            cmd_parts.extend(["-c", f'"{escaped_condition}"'])
 
         cmd_parts.append(location)
 
