@@ -110,7 +110,7 @@ class GDBSession:
                 if self.controller:
                     try:
                         self.controller.exit()
-                    except:
+                    except Exception:
                         pass  # Best effort cleanup
                     self.controller = None
                 error_response: Dict[str, Any] = {
@@ -362,7 +362,7 @@ class GDBSession:
                             self.controller.gdb_process, subprocess.Popen
                         ):
                             exit_code = self.controller.gdb_process.poll()
-                    except:
+                    except Exception:
                         pass
 
                     error_details = f"GDB process exited unexpectedly after {elapsed:.1f}s"
@@ -424,7 +424,7 @@ class GDBSession:
                             if self.controller:
                                 try:
                                     self.controller.exit()
-                                except:
+                                except Exception:
                                     pass  # Best effort cleanup
                                 self.controller = None
                                 self.is_running = False
