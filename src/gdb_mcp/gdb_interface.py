@@ -16,7 +16,6 @@ FILE_LOAD_TIMEOUT_SEC = 300  # 5 minutes for loading core/executable files
 INTERRUPT_RESPONSE_TIMEOUT_SEC = 2
 POLL_TIMEOUT_SEC = 0.1
 INIT_COMMAND_DELAY_SEC = 0.5
-INTERRUPT_SETTLE_TIME_SEC = 0.1
 
 # Other constants
 INITIAL_COMMAND_TOKEN = 1000
@@ -1028,12 +1027,36 @@ class GDBSession:
             # Send SIGINT to pause the running program
             os.kill(self.controller.gdb_process.pid, signal.SIGINT)
 
-            # Give GDB a moment to process the interrupt
-            time.sleep(INTERRUPT_SETTLE_TIME_SEC)
+            # Poll for *stopped notification with timeout
+            # This avoids arbitrary sleep and responds as soon as GDB confirms the stop
+            start_time = time.time()
+            all_responses: list[dict[str, Any]] = []
+            stopped_received = False
 
-            # Get the response
-            responses = self.controller.get_gdb_response(timeout_sec=INTERRUPT_RESPONSE_TIMEOUT_SEC)
-            result = self._parse_responses(responses)
+            while time.time() - start_time < INTERRUPT_RESPONSE_TIMEOUT_SEC:
+                responses = self.controller.get_gdb_response(
+                    timeout_sec=POLL_TIMEOUT_SEC, raise_error_on_timeout=False
+                )
+
+                if responses:
+                    all_responses.extend(responses)
+                    # Check for *stopped notification
+                    for resp in responses:
+                        if resp.get("type") == "notify" and resp.get("message") == "stopped":
+                            stopped_received = True
+                            break
+
+                if stopped_received:
+                    break
+
+            result = self._parse_responses(all_responses)
+
+            if not stopped_received:
+                return {
+                    "status": "warning",
+                    "message": "Interrupt sent but no stopped notification received",
+                    "result": result,
+                }
 
             return {
                 "status": "success",
