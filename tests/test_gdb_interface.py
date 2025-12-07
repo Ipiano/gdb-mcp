@@ -544,13 +544,13 @@ class TestExecutionControl:
 
     @patch("gdb_mcp.gdb_interface.GdbController")
     @patch("gdb_mcp.gdb_interface.os.kill")
-    @patch("time.sleep")  # time is imported locally in the method
-    def test_interrupt_success(self, mock_sleep, mock_kill, mock_controller_class):
-        """Test successful interrupt."""
+    def test_interrupt_success(self, mock_kill, mock_controller_class):
+        """Test successful interrupt with stopped notification."""
         mock_controller = MagicMock()
         mock_controller.gdb_process.pid = 12345
+        # Return the *stopped notification in GDB/MI format
         mock_controller.get_gdb_response.return_value = [
-            {"type": "notify", "payload": {"msg": "stopped"}}
+            {"type": "notify", "message": "stopped", "payload": {"reason": "signal-received"}}
         ]
 
         session = GDBSession()
@@ -560,6 +560,27 @@ class TestExecutionControl:
         result = session.interrupt()
 
         assert result["status"] == "success"
+        assert "interrupted" in result["message"].lower()
+        mock_kill.assert_called_once()
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    @patch("gdb_mcp.gdb_interface.os.kill")
+    def test_interrupt_no_stopped_notification(self, mock_kill, mock_controller_class):
+        """Test interrupt when no stopped notification is received."""
+        mock_controller = MagicMock()
+        mock_controller.gdb_process.pid = 12345
+        # Return empty responses (no stopped notification)
+        mock_controller.get_gdb_response.return_value = []
+
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        result = session.interrupt()
+
+        # Should return warning status when no stopped notification received
+        assert result["status"] == "warning"
+        assert "no stopped notification" in result["message"].lower()
         mock_kill.assert_called_once()
 
 
