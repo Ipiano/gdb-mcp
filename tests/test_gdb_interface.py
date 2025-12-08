@@ -870,3 +870,82 @@ class TestErrorHandling:
         assert result.get("fatal") is True
         # Session should be cleaned up
         assert session.controller is None
+
+
+class TestCallFunction:
+    """Test cases for the call_function method."""
+
+    def test_call_function_no_session(self):
+        """Test call_function when no session is running."""
+        session = GDBSession()
+        result = session.call_function('printf("hello")')
+        assert result["status"] == "error"
+        assert "No active GDB session" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_call_function_success(self, mock_controller_class):
+        """Test successful function call execution."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [
+                    {"type": "console", "payload": "$1 = 5\n"},
+                    {"type": "result", "payload": None, "token": 1000},
+                ],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            result = session.call_function('strlen("hello")')
+
+        assert result["status"] == "success"
+        assert result["function_call"] == 'strlen("hello")'
+        assert "$1 = 5" in result["result"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_call_function_timeout(self, mock_controller_class):
+        """Test call_function when command times out."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "command_responses": [],
+                "async_notifications": [],
+                "timed_out": True,
+            },
+        ):
+            result = session.call_function("some_slow_function()")
+
+        assert result["status"] == "error"
+        assert "Timeout" in result["message"]
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_call_function_error(self, mock_controller_class):
+        """Test call_function when there's an error."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        with patch.object(
+            session,
+            "_send_command_and_wait_for_prompt",
+            return_value={
+                "error": "No symbol table loaded",
+                "command_responses": [],
+                "async_notifications": [],
+                "timed_out": False,
+            },
+        ):
+            result = session.call_function("unknown_func()")
+
+        assert result["status"] == "error"
+        assert "No symbol table" in result["message"]

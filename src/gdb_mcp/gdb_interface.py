@@ -1170,3 +1170,64 @@ class GDBSession:
             "target_loaded": self.target_loaded,
             "has_controller": self.controller is not None,
         }
+
+    def call_function(
+        self, function_call: str, timeout_sec: int = DEFAULT_TIMEOUT_SEC
+    ) -> dict[str, Any]:
+        """
+        Call a function in the target process.
+
+        This is a privileged operation that executes the GDB 'call' command,
+        which invokes a function in the debugged program. This can execute
+        arbitrary code in the target process and may have side effects.
+
+        WARNING: Use with caution as this can modify program state.
+
+        Args:
+            function_call: Function call expression (e.g., "printf(\\"hello\\n\\")"
+                          or "my_function(arg1, arg2)")
+            timeout_sec: Timeout for command execution
+
+        Returns:
+            Dict with the function's return value or error
+        """
+        if not self.controller:
+            return {"status": "error", "message": "No active GDB session"}
+
+        if not self._is_gdb_alive():
+            return {
+                "status": "error",
+                "message": "GDB process has exited - cannot execute call",
+            }
+
+        # Build the call command
+        command = f"call {function_call}"
+
+        # Escape for MI command
+        escaped_command = command.replace("\\", "\\\\").replace('"', '\\"')
+        mi_command = f'-interpreter-exec console "{escaped_command}"'
+
+        result = self._send_command_and_wait_for_prompt(mi_command, timeout_sec)
+
+        if "error" in result:
+            return {
+                "status": "error",
+                "message": result["error"],
+                "function_call": function_call,
+            }
+
+        if result.get("timed_out"):
+            return {
+                "status": "error",
+                "message": f"Timeout waiting for call to complete after {timeout_sec}s",
+                "function_call": function_call,
+            }
+
+        parsed = self._parse_responses(result.get("command_responses", []))
+        console_output = "".join(parsed.get("console", []))
+
+        return {
+            "status": "success",
+            "function_call": function_call,
+            "result": console_output.strip() if console_output else "(no return value)",
+        }

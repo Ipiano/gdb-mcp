@@ -88,6 +88,13 @@ class FrameSelectArgs(BaseModel):
     frame_number: int = Field(..., description="Frame number (0 is current/innermost frame)")
 
 
+class CallFunctionArgs(BaseModel):
+    function_call: str = Field(
+        ...,
+        description="Function call expression (e.g., 'printf(\"hello\\n\")' or 'my_func(arg1, arg2)')",
+    )
+
+
 # List available tools
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -111,14 +118,14 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="gdb_execute_command",
             description=(
-                "Execute any GDB command directly. Supports both CLI and MI commands. "
+                "Execute a GDB command. Supports both CLI and MI commands. "
                 "CLI commands (like 'info breakpoints', 'list', 'print x') are automatically "
                 "handled and their output is formatted for readability. "
                 "MI commands (starting with '-', like '-break-list', '-exec-run') return "
-                "structured data. Use this for: "
-                "1) Commands not covered by specialized tools (info, show, set, etc.), "
-                "2) Starting programs ('run', 'start'), "
-                "3) Advanced GDB operations. "
+                "structured data. "
+                "NOTE: For calling functions in the target process, prefer using the dedicated "
+                "gdb_call_function tool instead of 'call' command, as it provides better "
+                "structured output and can be separately permissioned. "
                 "Common examples: 'info breakpoints', 'info threads', 'run', 'print variable', "
                 "'list main', 'disassemble func'."
             ),
@@ -314,6 +321,21 @@ async def list_tools() -> list[Tool]:
                 "properties": {},
             },
         ),
+        Tool(
+            name="gdb_call_function",
+            description=(
+                "Call a function in the target process. "
+                "WARNING: This is a privileged operation that executes code in the debugged program. "
+                "It can call any function accessible in the current context, including: "
+                "- Standard library functions: printf, malloc, free, etc. "
+                "- Program functions: any function defined in the program "
+                "- System calls via wrappers "
+                "The function executes with full privileges of the debugged process. "
+                "Use with caution as it may have side effects and modify program state. "
+                "Examples: 'printf(\"debug: x=%d\\n\", x)', 'my_cleanup_func()', 'strlen(str)'"
+            ),
+            inputSchema=CallFunctionArgs.model_json_schema(),
+        ),
     ]
 
 
@@ -407,6 +429,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         elif name == "gdb_stop_session":
             result = gdb_session.stop()
+
+        elif name == "gdb_call_function":
+            call_args: CallFunctionArgs = CallFunctionArgs(**arguments)
+            result = gdb_session.call_function(function_call=call_args.function_call)
 
         else:
             result = {"status": "error", "message": f"Unknown tool: {name}"}

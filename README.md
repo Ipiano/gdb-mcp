@@ -100,11 +100,12 @@ gdb-mcp-server
 
 ## Available Tools
 
-The GDB MCP Server provides 21 tools for controlling GDB debugging sessions:
+The GDB MCP Server provides 22 tools for controlling GDB debugging sessions:
 
 **Session Management:**
 - `gdb_start_session` - Start a new GDB session with optional initialization
-- `gdb_execute_command` - Execute any GDB command (CLI or MI)
+- `gdb_execute_command` - Execute GDB commands (CLI or MI format)
+- `gdb_call_function` - Call a function in the target process (dedicated tool for separate permissioning)
 - `gdb_get_status` - Get current session status
 - `gdb_stop_session` - Stop the current session
 

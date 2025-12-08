@@ -66,11 +66,15 @@ Environment variables are set for the debugged program before execution. This is
 - Testing with different environment configurations
 
 ### `gdb_execute_command`
-Execute any GDB command directly. Supports both CLI and MI commands.
+Execute a GDB command. Supports both CLI and MI commands.
 
 **Parameters:**
 - `command`: GDB command to execute (CLI or MI format)
-- `timeout_sec`: Timeout in seconds (default: 5)
+- `timeout_sec`: Timeout in seconds (default: 30)
+
+**NOTE:** For calling functions in the target process, prefer using the dedicated
+`gdb_call_function` tool instead of the 'call' command, as it provides better
+structured output and can be separately permissioned.
 
 **Automatically handles two types of commands:**
 
@@ -92,6 +96,34 @@ Execute any GDB command directly. Supports both CLI and MI commands.
 - `backtrace` - Show call stack
 - `list` - Show source code
 - `disassemble` - Show assembly code
+
+### `gdb_call_function`
+Call a function in the target process.
+
+**WARNING:** This is a privileged operation that executes code in the debugged program. Use with caution as it may have side effects.
+
+**Parameters:**
+- `function_call`: Function call expression (e.g., `printf("hello\n")` or `my_func(arg1, arg2)`)
+- `timeout_sec`: Timeout in seconds (default: 30)
+
+**Returns:**
+- `status`: "success" or "error"
+- `function_call`: The function call expression that was executed
+- `result`: The return value or output from the function call
+
+**Use this for:**
+- Calling standard library functions: `printf("debug: x=%d\n", x)`, `strlen(str)`
+- Calling program functions: `my_cleanup_func()`, `reset_state()`
+- Inspecting complex data structures via helper functions
+
+**Examples:**
+```json
+{"function_call": "printf(\"value: %d\\n\", x)"}
+{"function_call": "strlen(buffer)"}
+{"function_call": "validate_state()"}
+```
+
+**Note:** This dedicated tool enables MCP clients to implement separate permission controls for function calling, which executes code in the target process with the target's privileges.
 
 ### `gdb_get_status`
 Get the current status of the GDB session.

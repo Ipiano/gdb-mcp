@@ -131,3 +131,28 @@ class TestGetVariablesArgs:
         args = GetVariablesArgs(thread_id=3, frame=2)
         assert args.thread_id == 3
         assert args.frame == 2
+
+
+class TestCallFunctionArgs:
+    """Test cases for CallFunctionArgs model."""
+
+    def test_function_call_required(self):
+        """Test that function_call is required."""
+        from gdb_mcp.server import CallFunctionArgs
+
+        with pytest.raises(ValidationError):
+            CallFunctionArgs()
+
+    def test_function_call_arg(self):
+        """Test function_call argument."""
+        from gdb_mcp.server import CallFunctionArgs
+
+        args = CallFunctionArgs(function_call='printf("hello")')
+        assert args.function_call == 'printf("hello")'
+
+    def test_function_call_with_args(self):
+        """Test function_call with multiple arguments."""
+        from gdb_mcp.server import CallFunctionArgs
+
+        args = CallFunctionArgs(function_call='snprintf(buf, 100, "%d", x)')
+        assert args.function_call == 'snprintf(buf, 100, "%d", x)'
