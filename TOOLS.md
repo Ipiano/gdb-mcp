@@ -10,14 +10,17 @@ Start a new GDB debugging session.
 **Parameters:**
 - `program` (optional): Path to executable to debug
 - `args` (optional): Command-line arguments for the program
+- `core` (optional): Path to core dump file (uses --core flag for proper symbol resolution)
 - `init_commands` (optional): List of GDB commands to run on startup
 - `env` (optional): Environment variables to set for the debugged program (dictionary of name-value pairs)
 - `gdb_path` (optional): Path to GDB executable (default: "gdb")
+- `working_dir` (optional): Working directory to use when starting GDB
 
 **Returns:**
 - `status`: "success" or "error"
 - `message`: Status message
-- `program`: Program path
+- `program` (optional): Program path if specified
+- `core` (optional): Core dump path if specified
 - `startup_output` (optional): GDB's initial output when loading the program
 - `warnings` (optional): Array of critical warnings detected, such as:
   - "No debugging symbols found - program was not compiled with -g"
@@ -28,10 +31,24 @@ Start a new GDB debugging session.
 
 **Important:** Always check the `warnings` field! Missing debug symbols will prevent breakpoints from working and variable inspection from showing useful information.
 
-**Example init_commands:**
+**Core Dump Debugging:**
+
+When debugging core dumps with a sysroot, the order of operations matters for proper symbol resolution. Set `sysroot` and `solib-search-path` **AFTER** loading the core:
+
+```json
+{
+  "program": "/path/to/executable",
+  "core": "/path/to/core.dump",
+  "init_commands": [
+    "set sysroot /path/to/sysroot",
+    "set solib-search-path /path/to/libs"
+  ]
+}
+```
+
+If using `core-file` in init_commands instead of the `core` parameter, ensure it comes before sysroot:
 ```python
 [
-    "file /path/to/executable",
     "core-file /path/to/core.dump",
     "set sysroot /path/to/sysroot",
     "set solib-search-path /path/to/libs"

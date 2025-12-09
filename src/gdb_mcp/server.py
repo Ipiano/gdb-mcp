@@ -50,6 +50,15 @@ class StartSessionArgs(BaseModel):
             "Example: If debugging a server that loads config from './config.json', set working_dir to the server's directory."
         ),
     )
+    core: Optional[str] = Field(
+        None,
+        description=(
+            "Path to core dump file for post-mortem debugging. "
+            "When specified, GDB is started with --core flag which properly initializes symbol resolution. "
+            "IMPORTANT: When using a sysroot with core dumps, set sysroot AFTER the core is loaded "
+            "(either via this parameter or core-file command) for symbols to resolve correctly."
+        ),
+    )
 
 
 class ExecuteCommandArgs(BaseModel):
@@ -109,9 +118,13 @@ async def list_tools() -> list[Tool]:
                 "missing debug symbols (not compiled with -g), file not found, or invalid executable. "
                 "Check the 'warnings' field in the response for critical issues that may affect debugging. "
                 "Available parameters: program (executable path), args (program arguments), "
-                "init_commands (GDB commands like 'core-file /path/to/core', 'set sysroot /path'), "
+                "core (core dump path - uses --core flag for proper symbol resolution), "
+                "init_commands (GDB commands to run after loading), "
                 "env (environment variables), gdb_path (GDB binary path), "
-                "working_dir (directory to run program from - use when program needs specific working directory)."
+                "working_dir (directory to run program from). "
+                "IMPORTANT for core dump debugging: Set 'sysroot' and 'solib-search-path' AFTER "
+                "loading the core (either via 'core' parameter or 'core-file' init_command) "
+                "for symbols to resolve correctly."
             ),
             inputSchema=StartSessionArgs.model_json_schema(),
         ),
@@ -354,6 +367,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 env=args.env,
                 gdb_path=args.gdb_path,
                 working_dir=args.working_dir,
+                core=args.core,
             )
 
         elif name == "gdb_execute_command":

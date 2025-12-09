@@ -45,6 +45,7 @@ class GDBSession:
         env: Optional[dict[str, str]] = None,
         gdb_path: Optional[str] = None,
         working_dir: Optional[str] = None,
+        core: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Start a new GDB session.
@@ -52,20 +53,27 @@ class GDBSession:
         Args:
             program: Path to the executable to debug
             args: Command-line arguments for the program
-            init_commands: List of GDB commands to run on startup (e.g., loading core dumps)
+            init_commands: List of GDB commands to run on startup
             env: Environment variables to set for the debugged program
             gdb_path: Path to GDB executable (default: from GDB_PATH env var or 'gdb')
             working_dir: Working directory to use when starting GDB (changes directory
                         before spawning GDB process, then restores it)
+            core: Path to core dump file (uses --core flag for proper symbol resolution)
 
         Returns:
             Dict with status and any output messages
 
-        Example init_commands:
-            ["file /path/to/executable",
-             "core-file /path/to/core",
-             "set sysroot /path/to/sysroot",
-             "set solib-search-path /path/to/libs"]
+        IMPORTANT for core dump debugging:
+            When using sysroot with core dumps, set sysroot AFTER loading the core
+            for symbols to resolve correctly. Either:
+            1. Use the 'core' parameter, then set sysroot via init_commands
+            2. Use 'core-file' in init_commands, then set sysroot after it
+
+        Example for core dump with sysroot:
+            program="/path/to/executable"
+            core="/path/to/core"
+            init_commands=["set sysroot /path/to/sysroot",
+                          "set solib-search-path /path/to/libs"]
 
         Example env:
             {"LD_LIBRARY_PATH": "/custom/libs", "DEBUG_MODE": "1"}
@@ -97,10 +105,23 @@ class GDBSession:
             # Build command list: [gdb_path, --quiet, --interpreter=mi, ...]
             # --quiet suppresses the copyright/license banner
             gdb_command = [gdb_path, "--quiet", "--interpreter=mi"]
+
+            # For core dump debugging or simple program loading without args,
+            # don't use --args (it changes how GDB interprets the command line)
+            # For programs with arguments, use --args
             if program:
-                gdb_command.extend(["--args", program])
                 if args:
+                    # Program with arguments - use --args
+                    gdb_command.extend(["--args", program])
                     gdb_command.extend(args)
+                else:
+                    # Program without arguments - just add the program path
+                    gdb_command.append(program)
+
+            # Add core dump file if specified (uses --core for proper symbol resolution)
+            if core:
+                gdb_command.extend(["--core", core])
+                logger.info(f"Loading core dump: {core}")
 
             # pygdbmi 0.11+ uses 'command' parameter instead of 'gdb_path' and 'gdb_args'
             # Use 1.0s for output checking to robustly handle core files with errors/warnings
@@ -231,35 +252,38 @@ class GDBSession:
                     result = self.execute_command(env_cmd)
                     env_output.append(result)
 
-            # Set target_loaded if a program was specified (via --args or init commands)
-            if program:
+            # Set target_loaded if a program or core was specified
+            if program or core:
                 self.target_loaded = True
 
             self.is_running = True
 
-            result = {
+            final_result: dict[str, Any] = {
                 "status": "success",
-                "message": f"GDB session started",
-                "program": program,
+                "message": "GDB session started",
             }
+            if program:
+                final_result["program"] = program
+            if core:
+                final_result["core"] = core
 
             # Include startup messages if there were any
             if startup_console.strip():
-                result["startup_output"] = startup_console.strip()
+                final_result["startup_output"] = startup_console.strip()
 
             # Include warnings if any detected
             if warnings:
-                result["warnings"] = warnings
+                final_result["warnings"] = warnings
 
             # Include environment setup output if any
             if env_output:
-                result["env_output"] = env_output
+                final_result["env_output"] = env_output
 
             # Include init command output if any
             if init_output:
-                result["init_output"] = init_output
+                final_result["init_output"] = init_output
 
-            return result
+            return final_result
 
         except Exception as e:
             logger.error(f"Failed to start GDB session: {e}")
