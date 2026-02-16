@@ -1,8 +1,9 @@
-"""Integration tests for GDBSession with real GDB instances.
+"""Integration tests for GDB MCP Server with real GDB instances.
 
-These tests compile and debug a real C++ program using GDB. They validate
-the complete workflow of the GDBSession object including:
-- Starting GDB sessions with compiled programs
+These tests compile and debug a real C++ program using GDB through the MCP
+server interface. They validate the complete workflow including:
+- Starting GDB sessions with compiled programs via gdb_start_session
+- Session management with session_id routing
 - Setting and managing breakpoints
 - Stepping through code execution
 - Inspecting variables and call stacks
@@ -17,8 +18,26 @@ import pytest
 import tempfile
 import subprocess
 import os
+import asyncio
+import json
 from pathlib import Path
-from gdb_mcp.gdb_interface import GDBSession
+from gdb_mcp.server import call_tool
+
+
+def call_gdb_tool(tool_name: str, arguments: dict) -> dict:
+    """
+    Helper to call MCP tools synchronously and return parsed result.
+
+    Args:
+        tool_name: Name of the GDB MCP tool to call
+        arguments: Arguments dictionary for the tool
+
+    Returns:
+        Parsed JSON result from the tool call
+    """
+    result = asyncio.run(call_tool(tool_name, arguments))
+    # Parse the JSON response from the tool
+    return json.loads(result[0].text)
 
 
 # Simple C++ program with function calls for testing
@@ -78,99 +97,124 @@ def compiled_program():
 
 
 @pytest.fixture
-def gdb_session():
+def session_id(compiled_program):
     """
-    Fixture that provides a GDBSession instance and ensures cleanup.
+    Fixture that starts a GDB MCP session and returns its session_id.
 
-    Wraps the start() method to automatically set disable-randomization on,
-    which helps avoid ASLR-related crashes in containerized environments.
+    Automatically configures the session to avoid ASLR-related crashes in
+    containerized environments. Ensures cleanup after test completion.
+
+    Args:
+        compiled_program: Path to compiled test program
+
+    Yields:
+        session_id: Integer session ID for use in subsequent tool calls
     """
-    session = GDBSession()
+    # Start session with ASLR configuration to avoid crashes
+    init_commands = [
+        "set disable-randomization on",
+        "set startup-with-shell off",
+    ]
 
-    # Wrap the start method to automatically add ASLR configuration
-    original_start = session.start
+    result = call_gdb_tool(
+        "gdb_start_session",
+        {
+            "program": compiled_program,
+            "init_commands": init_commands,
+        },
+    )
 
-    def wrapped_start(*args, **kwargs):
-        # Get existing init_commands or create new list
-        init_commands = kwargs.get("init_commands", [])
-        if init_commands is None:
-            init_commands = []
-        else:
-            init_commands = list(init_commands)  # Make a copy
+    assert result["status"] == "success", f"Failed to start session: {result}"
+    session_id = result["session_id"]
 
-        # Add commands to help avoid random crashes in containerized environments:
-        # - disable-randomization: Try to disable ASLR for the debugged program
-        # - startup-with-shell: Avoid shell wrapper that might have ASLR enabled
-        init_commands.insert(0, "set startup-with-shell off")
-        init_commands.insert(0, "set disable-randomization on")
+    yield session_id
 
-        # Update kwargs with modified init_commands
-        kwargs["init_commands"] = init_commands
-
-        # Call original start method
-        return original_start(*args, **kwargs)
-
-    session.start = wrapped_start
-
-    yield session
-    # Ensure session is stopped after test
-    if session.is_running:
-        session.stop()
+    # Cleanup: stop the session
+    try:
+        call_gdb_tool("gdb_stop_session", {"session_id": session_id})
+    except Exception:
+        # Session may already be stopped by the test
+        pass
 
 
 # Integration tests that run GDB with a real program
 
 
 @pytest.mark.integration
-def test_start_session_with_program(gdb_session, compiled_program):
-    """Test starting a GDB session with a compiled program."""
-    result = gdb_session.start(program=compiled_program)
+def test_start_session_with_program(compiled_program):
+    """Test starting a GDB session with a compiled program via MCP server."""
+    # Start session (session_id fixture already starts one, but let's test explicitly)
+    result = call_gdb_tool(
+        "gdb_start_session",
+        {
+            "program": compiled_program,
+            "init_commands": [
+                "set disable-randomization on",
+                "set startup-with-shell off",
+            ],
+        },
+    )
 
     assert result["status"] == "success"
     assert result["program"] == compiled_program
-    assert gdb_session.is_running is True
-    assert gdb_session.target_loaded is True
+    assert "session_id" in result
+    assert isinstance(result["session_id"], int)
+    session_id = result["session_id"]
+
+    # Verify session status
+    status = call_gdb_tool("gdb_get_status", {"session_id": session_id})
+    assert status["is_running"] is True
+    assert status["target_loaded"] is True
+
+    # Cleanup
+    call_gdb_tool("gdb_stop_session", {"session_id": session_id})
 
 
 @pytest.mark.integration
-def test_set_and_list_breakpoints(gdb_session, compiled_program):
+def test_set_and_list_breakpoints(session_id):
     """Test setting breakpoints and listing them."""
-    # Start session
-    gdb_session.start(program=compiled_program)
-
     # Set breakpoint at main
-    bp_result = gdb_session.set_breakpoint("main")
+    bp_result = call_gdb_tool(
+        "gdb_set_breakpoint",
+        {
+            "session_id": session_id,
+            "location": "main",
+        },
+    )
     assert bp_result["status"] == "success"
     assert "breakpoint" in bp_result
     # Function name might be "main" or "main()" depending on GDB version
     assert "main" in bp_result["breakpoint"]["func"]
 
     # Set breakpoint at add function
-    bp_result2 = gdb_session.set_breakpoint("add")
+    bp_result2 = call_gdb_tool(
+        "gdb_set_breakpoint",
+        {
+            "session_id": session_id,
+            "location": "add",
+        },
+    )
     assert bp_result2["status"] == "success"
 
     # List all breakpoints
-    list_result = gdb_session.list_breakpoints()
+    list_result = call_gdb_tool("gdb_list_breakpoints", {"session_id": session_id})
     assert list_result["status"] == "success"
     assert list_result["count"] == 2
     assert len(list_result["breakpoints"]) == 2
 
 
 @pytest.mark.integration
-def test_run_and_hit_breakpoint(gdb_session, compiled_program):
+def test_run_and_hit_breakpoint(session_id):
     """Test running the program and hitting a breakpoint."""
-    # Start session
-    gdb_session.start(program=compiled_program)
-
     # Set breakpoint at main
-    gdb_session.set_breakpoint("main")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
 
     # Run the program (it should stop at main)
-    run_result = gdb_session.run()
+    run_result = call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
     assert run_result["status"] == "success"
 
     # Get backtrace to verify we're at main
-    backtrace = gdb_session.get_backtrace()
+    backtrace = call_gdb_tool("gdb_get_backtrace", {"session_id": session_id})
     assert backtrace["status"] == "success"
     assert backtrace["count"] > 0
     # Check that we're in main function (func might be "main", "main()", etc.)
@@ -179,63 +223,56 @@ def test_run_and_hit_breakpoint(gdb_session, compiled_program):
 
 
 @pytest.mark.integration
-def test_step_through_functions(gdb_session, compiled_program):
+def test_step_through_functions(session_id):
     """Test stepping through function calls."""
-    # Start session
-    gdb_session.start(program=compiled_program)
-
     # Set breakpoint at main
-    gdb_session.set_breakpoint("main")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
 
     # Run to breakpoint
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # Step a few times
     for _ in range(3):
-        step_result = gdb_session.step()
+        step_result = call_gdb_tool("gdb_step", {"session_id": session_id})
         assert step_result["status"] == "success"
 
     # Verify we can still get a backtrace
-    backtrace = gdb_session.get_backtrace()
+    backtrace = call_gdb_tool("gdb_get_backtrace", {"session_id": session_id})
     assert backtrace["status"] == "success"
     assert backtrace["count"] > 0
 
 
 @pytest.mark.integration
-def test_inspect_variables(gdb_session, compiled_program):
+def test_inspect_variables(session_id):
     """Test inspecting variable values."""
-    # Start session
-    gdb_session.start(program=compiled_program)
-
     # Set breakpoint in the add function
-    gdb_session.set_breakpoint("add")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "add"})
 
     # Run to breakpoint (stops at the add function)
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # Step to ensure we're in the function body
-    gdb_session.next()
+    call_gdb_tool("gdb_next", {"session_id": session_id})
 
     # Try to evaluate the parameters
-    eval_result = gdb_session.evaluate_expression("a")
+    eval_result = call_gdb_tool(
+        "gdb_evaluate_expression", {"session_id": session_id, "expression": "a"}
+    )
     # Note: This might not work if we haven't stepped to the right location
     # but we can at least verify the command executes
 
 
 @pytest.mark.integration
-def test_backtrace_across_functions(gdb_session, compiled_program):
+def test_backtrace_across_functions(session_id):
     """Test getting backtrace when nested in function calls."""
-    # Start session
-    gdb_session.start(program=compiled_program)
-
     # Set breakpoint in the add function (called from calculate)
-    gdb_session.set_breakpoint("add")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "add"})
 
     # Run to breakpoint (this will stop at the add function)
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # Get backtrace
-    backtrace = gdb_session.get_backtrace()
+    backtrace = call_gdb_tool("gdb_get_backtrace", {"session_id": session_id})
     assert backtrace["status"] == "success"
 
     # Should have at least 2 frames (add and its caller)
@@ -249,160 +286,182 @@ def test_backtrace_across_functions(gdb_session, compiled_program):
 
 
 @pytest.mark.integration
-def test_next_vs_step(gdb_session, compiled_program):
+def test_next_vs_step(session_id):
     """Test difference between next (step over) and step (step into)."""
-    # Start session
-    gdb_session.start(program=compiled_program)
-
     # Set breakpoint at main
-    gdb_session.set_breakpoint("main")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
 
     # Run to breakpoint
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # Use next() which should step over function calls
     # This should execute but stay in the same function
-    next_result = gdb_session.next()
+    next_result = call_gdb_tool("gdb_next", {"session_id": session_id})
     assert next_result["status"] == "success"
 
     # Get backtrace after next - should still be in main or at same depth
-    backtrace1 = gdb_session.get_backtrace()
+    backtrace1 = call_gdb_tool("gdb_get_backtrace", {"session_id": session_id})
     depth1 = backtrace1["count"]
 
     # Now try step() which should step into function calls
-    step_result = gdb_session.step()
+    step_result = call_gdb_tool("gdb_step", {"session_id": session_id})
     assert step_result["status"] == "success"
 
 
 @pytest.mark.integration
-def test_evaluate_expressions(gdb_session, compiled_program):
+def test_evaluate_expressions(session_id):
     """Test evaluating expressions at runtime."""
-    # Start session
-    gdb_session.start(program=compiled_program)
-
     # Set breakpoint at main
-    gdb_session.set_breakpoint("main")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
 
     # Run to breakpoint
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # Step a few times to get past variable declarations
     for _ in range(3):
-        gdb_session.next()
+        call_gdb_tool("gdb_next", {"session_id": session_id})
 
     # Try to evaluate a simple expression
-    result = gdb_session.evaluate_expression("5 + 3")
+    result = call_gdb_tool(
+        "gdb_evaluate_expression", {"session_id": session_id, "expression": "5 + 3"}
+    )
     # GDB should be able to evaluate constant expressions
     if result["status"] == "success":
         assert "value" in result
 
 
 @pytest.mark.integration
-def test_get_variables_in_frame(gdb_session, compiled_program):
+def test_get_variables_in_frame(session_id):
     """Test getting local variables in the current frame."""
-    # Start session
-    gdb_session.start(program=compiled_program)
-
     # Set breakpoint at add function
-    gdb_session.set_breakpoint("add")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "add"})
 
     # Run to breakpoint
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # Step to ensure we're in the function body
-    gdb_session.next()
+    call_gdb_tool("gdb_next", {"session_id": session_id})
 
     # Get local variables
-    vars_result = gdb_session.get_variables()
+    vars_result = call_gdb_tool("gdb_get_variables", {"session_id": session_id})
     assert vars_result["status"] == "success"
     # Should have variables like 'a', 'b', 'result'
     assert "variables" in vars_result
 
 
 @pytest.mark.integration
-def test_session_cleanup(gdb_session, compiled_program):
+@pytest.mark.integration
+def test_session_cleanup(compiled_program):
     """Test that session can be properly stopped and restarted."""
-    # Start session
-    result1 = gdb_session.start(program=compiled_program)
+    # Start first session
+    result1 = call_gdb_tool(
+        "gdb_start_session",
+        {
+            "program": compiled_program,
+            "init_commands": ["set disable-randomization on"],
+        },
+    )
     assert result1["status"] == "success"
-    assert gdb_session.is_running is True
+    assert "session_id" in result1
+    session_id1 = result1["session_id"]
+
+    # Verify session is running
+    status1 = call_gdb_tool("gdb_get_status", {"session_id": session_id1})
+    assert status1["is_running"] is True
 
     # Stop session
-    stop_result = gdb_session.stop()
+    stop_result = call_gdb_tool("gdb_stop_session", {"session_id": session_id1})
     assert stop_result["status"] == "success"
-    assert gdb_session.is_running is False
-    assert gdb_session.controller is None
 
     # Verify we can start another session
-    result2 = gdb_session.start(program=compiled_program)
+    result2 = call_gdb_tool(
+        "gdb_start_session",
+        {
+            "program": compiled_program,
+            "init_commands": ["set disable-randomization on"],
+        },
+    )
     assert result2["status"] == "success"
-    assert gdb_session.is_running is True
+    assert "session_id" in result2
+    session_id2 = result2["session_id"]
+
+    # Verify new session is running
+    status2 = call_gdb_tool("gdb_get_status", {"session_id": session_id2})
+    assert status2["is_running"] is True
+
+    # Cleanup
+    call_gdb_tool("gdb_stop_session", {"session_id": session_id2})
 
 
 @pytest.mark.integration
-def test_conditional_breakpoint(gdb_session, compiled_program):
+def test_conditional_breakpoint(session_id):
     """Test setting a conditional breakpoint."""
-    # Start session
-    gdb_session.start(program=compiled_program)
-
     # Set conditional breakpoint
     # This sets a breakpoint in add function only when a > 10
-    bp_result = gdb_session.set_breakpoint("add", condition="a > 10")
+    bp_result = call_gdb_tool(
+        "gdb_set_breakpoint",
+        {"session_id": session_id, "location": "add", "condition": "a > 10"},
+    )
     assert bp_result["status"] == "success"
 
     # List breakpoints to verify it was set
-    list_result = gdb_session.list_breakpoints()
+    list_result = call_gdb_tool("gdb_list_breakpoints", {"session_id": session_id})
     assert list_result["status"] == "success"
     assert list_result["count"] == 1
 
 
 @pytest.mark.integration
-def test_temporary_breakpoint(gdb_session, compiled_program):
+def test_temporary_breakpoint(session_id):
     """Test setting a temporary breakpoint."""
-    # Start session
-    gdb_session.start(program=compiled_program)
-
     # Set temporary breakpoint at main
-    bp_result = gdb_session.set_breakpoint("main", temporary=True)
+    bp_result = call_gdb_tool(
+        "gdb_set_breakpoint",
+        {"session_id": session_id, "location": "main", "temporary": True},
+    )
     assert bp_result["status"] == "success"
 
     # Run to hit the breakpoint
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # After hitting a temporary breakpoint once, it should be removed
     # Continue and check breakpoint list
-    list_result = gdb_session.list_breakpoints()
+    list_result = call_gdb_tool("gdb_list_breakpoints", {"session_id": session_id})
     assert list_result["status"] == "success"
     # Temporary breakpoint should be gone after being hit
     # (though we can't guarantee it was hit vs still pending)
 
 
 @pytest.mark.integration
-def test_get_status(gdb_session, compiled_program):
+def test_get_status(compiled_program):
     """Test getting session status."""
-    # Check status before starting
-    status = gdb_session.get_status()
-    assert status["is_running"] is False
-    assert status["target_loaded"] is False
-
-    # Start session
-    gdb_session.start(program=compiled_program)
+    # Start a session to test status
+    result = call_gdb_tool(
+        "gdb_start_session",
+        {
+            "program": compiled_program,
+            "init_commands": ["set disable-randomization on"],
+        },
+    )
+    assert result["status"] == "success"
+    session_id = result["session_id"]
 
     # Check status after starting
-    status = gdb_session.get_status()
+    status = call_gdb_tool("gdb_get_status", {"session_id": session_id})
     assert status["is_running"] is True
     assert status["target_loaded"] is True
 
+    # Cleanup
+    call_gdb_tool("gdb_stop_session", {"session_id": session_id})
+
 
 @pytest.mark.integration
-def test_cli_commands(gdb_session, compiled_program):
+def test_cli_commands(session_id):
     """Test executing CLI commands (non-MI commands)."""
-    # Start session
-    gdb_session.start(program=compiled_program)
-
     # Execute a CLI command before running the program
     # This is more reliable than trying to run it after the program starts
-    result = gdb_session.execute_command("info functions")
+    result = call_gdb_tool(
+        "gdb_execute_command", {"session_id": session_id, "command": "info functions"}
+    )
     assert result["status"] == "success"
     assert "output" in result
     # Should show our functions (they're defined even before running)
@@ -414,42 +473,42 @@ def test_cli_commands(gdb_session, compiled_program):
 
 
 @pytest.mark.integration
-def test_breakpoint_at_nonexistent_function(gdb_session, compiled_program):
+def test_breakpoint_at_nonexistent_function(session_id):
     """Test setting breakpoint at a function that doesn't exist."""
-    gdb_session.start(program=compiled_program)
 
     # Try to set breakpoint at non-existent function
-    bp_result = gdb_session.set_breakpoint("nonexistent_function")
+    bp_result = call_gdb_tool(
+        "gdb_set_breakpoint",
+        {"session_id": session_id, "location": "nonexistent_function"},
+    )
     # GDB might still create a pending breakpoint, but won't have full info
     # Just verify the command executes without crashing
 
 
 @pytest.mark.integration
-def test_execute_command_before_run(gdb_session, compiled_program):
+def test_execute_command_before_run(session_id):
     """Test that we can execute commands before running the program."""
-    gdb_session.start(program=compiled_program)
 
     # Execute commands before running
-    list_result = gdb_session.list_breakpoints()
+    list_result = call_gdb_tool("gdb_list_breakpoints", {"session_id": session_id})
     assert list_result["status"] == "success"
     assert list_result["count"] == 0
 
 
 @pytest.mark.integration
-def test_multiple_breakpoints_same_location(gdb_session, compiled_program):
+def test_multiple_breakpoints_same_location(session_id):
     """Test setting multiple breakpoints at the same location."""
-    gdb_session.start(program=compiled_program)
 
     # Set breakpoint at main
-    bp1 = gdb_session.set_breakpoint("main")
+    bp1 = call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
     assert bp1["status"] == "success"
 
     # Set another breakpoint at main
-    bp2 = gdb_session.set_breakpoint("main")
+    bp2 = call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
     assert bp2["status"] == "success"
 
     # Both should be in the list
-    list_result = gdb_session.list_breakpoints()
+    list_result = call_gdb_tool("gdb_list_breakpoints", {"session_id": session_id})
     assert list_result["status"] == "success"
     assert list_result["count"] == 2
 
@@ -458,29 +517,30 @@ def test_multiple_breakpoints_same_location(gdb_session, compiled_program):
 
 
 @pytest.mark.integration
-def test_delete_breakpoint(gdb_session, compiled_program):
+def test_delete_breakpoint(session_id):
     """Test deleting a breakpoint."""
-    gdb_session.start(program=compiled_program)
 
     # Set a breakpoint
-    bp_result = gdb_session.set_breakpoint("main")
+    bp_result = call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
     assert bp_result["status"] == "success"
     bp_number = int(bp_result["breakpoint"]["number"])
 
     # Set another breakpoint
-    bp2_result = gdb_session.set_breakpoint("add")
+    bp2_result = call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "add"})
     assert bp2_result["status"] == "success"
 
     # Verify we have 2 breakpoints
-    list_result = gdb_session.list_breakpoints()
+    list_result = call_gdb_tool("gdb_list_breakpoints", {"session_id": session_id})
     assert list_result["count"] == 2
 
     # Delete the first breakpoint
-    delete_result = gdb_session.delete_breakpoint(bp_number)
+    delete_result = call_gdb_tool(
+        "gdb_delete_breakpoint", {"session_id": session_id, "number": bp_number}
+    )
     assert delete_result["status"] == "success"
 
     # Verify only 1 breakpoint remains
-    list_result = gdb_session.list_breakpoints()
+    list_result = call_gdb_tool("gdb_list_breakpoints", {"session_id": session_id})
     assert list_result["count"] == 1
     # Verify the remaining breakpoint is at add
     remaining_bp = list_result["breakpoints"][0]
@@ -488,45 +548,47 @@ def test_delete_breakpoint(gdb_session, compiled_program):
 
 
 @pytest.mark.integration
-def test_enable_disable_breakpoint(gdb_session, compiled_program):
+def test_enable_disable_breakpoint(session_id):
     """Test enabling and disabling a breakpoint."""
-    gdb_session.start(program=compiled_program)
 
     # Set a breakpoint
-    bp_result = gdb_session.set_breakpoint("main")
+    bp_result = call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
     assert bp_result["status"] == "success"
     bp_number = int(bp_result["breakpoint"]["number"])
 
     # Disable the breakpoint
-    disable_result = gdb_session.disable_breakpoint(bp_number)
+    disable_result = call_gdb_tool(
+        "gdb_disable_breakpoint", {"session_id": session_id, "number": bp_number}
+    )
     assert disable_result["status"] == "success"
 
     # Verify it's disabled
-    list_result = gdb_session.list_breakpoints()
+    list_result = call_gdb_tool("gdb_list_breakpoints", {"session_id": session_id})
     assert list_result["count"] == 1
     bp_info = list_result["breakpoints"][0]
     assert bp_info["enabled"] == "n"
 
     # Enable the breakpoint
-    enable_result = gdb_session.enable_breakpoint(bp_number)
+    enable_result = call_gdb_tool(
+        "gdb_enable_breakpoint", {"session_id": session_id, "number": bp_number}
+    )
     assert enable_result["status"] == "success"
 
     # Verify it's enabled
-    list_result = gdb_session.list_breakpoints()
+    list_result = call_gdb_tool("gdb_list_breakpoints", {"session_id": session_id})
     assert list_result["count"] == 1
     bp_info = list_result["breakpoints"][0]
     assert bp_info["enabled"] == "y"
 
 
 @pytest.mark.integration
-def test_breakpoint_workflow(gdb_session, compiled_program):
+def test_breakpoint_workflow(session_id):
     """Test a complete breakpoint management workflow."""
-    gdb_session.start(program=compiled_program)
 
     # Set multiple breakpoints
-    bp1 = gdb_session.set_breakpoint("main")
-    bp2 = gdb_session.set_breakpoint("add")
-    bp3 = gdb_session.set_breakpoint("multiply")
+    bp1 = call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
+    bp2 = call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "add"})
+    bp3 = call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "multiply"})
     assert all(bp["status"] == "success" for bp in [bp1, bp2, bp3])
 
     bp1_num = int(bp1["breakpoint"]["number"])
@@ -534,17 +596,17 @@ def test_breakpoint_workflow(gdb_session, compiled_program):
     bp3_num = int(bp3["breakpoint"]["number"])
 
     # Verify all 3 breakpoints exist
-    list_result = gdb_session.list_breakpoints()
+    list_result = call_gdb_tool("gdb_list_breakpoints", {"session_id": session_id})
     assert list_result["count"] == 3
 
     # Disable one breakpoint
-    gdb_session.disable_breakpoint(bp2_num)
+    call_gdb_tool("gdb_disable_breakpoint", {"session_id": session_id, "number": bp2_num})
 
     # Delete one breakpoint
-    gdb_session.delete_breakpoint(bp3_num)
+    call_gdb_tool("gdb_delete_breakpoint", {"session_id": session_id, "number": bp3_num})
 
     # Verify we have 2 breakpoints (one deleted)
-    list_result = gdb_session.list_breakpoints()
+    list_result = call_gdb_tool("gdb_list_breakpoints", {"session_id": session_id})
     assert list_result["count"] == 2
 
     # Verify the disabled breakpoint is still disabled
@@ -557,18 +619,17 @@ def test_breakpoint_workflow(gdb_session, compiled_program):
 
 
 @pytest.mark.integration
-def test_get_threads(gdb_session, compiled_program):
+def test_get_threads(session_id):
     """Test getting thread information."""
-    gdb_session.start(program=compiled_program)
 
     # Set breakpoint at main
-    gdb_session.set_breakpoint("main")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
 
     # Run to breakpoint
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # Get threads
-    threads_result = gdb_session.get_threads()
+    threads_result = call_gdb_tool("gdb_get_threads", {"session_id": session_id})
     assert threads_result["status"] == "success"
     assert "threads" in threads_result
     assert threads_result["count"] >= 1  # Should have at least the main thread
@@ -576,18 +637,17 @@ def test_get_threads(gdb_session, compiled_program):
 
 
 @pytest.mark.integration
-def test_select_thread(gdb_session, compiled_program):
+def test_select_thread(session_id):
     """Test selecting a thread."""
-    gdb_session.start(program=compiled_program)
 
     # Set breakpoint at main
-    gdb_session.set_breakpoint("main")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
 
     # Run to breakpoint
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # Get threads
-    threads_result = gdb_session.get_threads()
+    threads_result = call_gdb_tool("gdb_get_threads", {"session_id": session_id})
     assert threads_result["status"] == "success"
     assert threads_result["count"] >= 1
 
@@ -596,7 +656,10 @@ def test_select_thread(gdb_session, compiled_program):
     assert current_thread_id is not None
 
     # Select the current thread (should succeed)
-    select_result = gdb_session.select_thread(int(current_thread_id))
+    select_result = call_gdb_tool(
+        "gdb_select_thread",
+        {"session_id": session_id, "thread_id": int(current_thread_id)},
+    )
     assert select_result["status"] == "success"
     assert select_result["thread_id"] == int(current_thread_id)
 
@@ -605,18 +668,17 @@ def test_select_thread(gdb_session, compiled_program):
 
 
 @pytest.mark.integration
-def test_get_frame_info(gdb_session, compiled_program):
+def test_get_frame_info(session_id):
     """Test getting information about the current frame."""
-    gdb_session.start(program=compiled_program)
 
     # Set breakpoint in add function
-    gdb_session.set_breakpoint("add")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "add"})
 
     # Run to breakpoint
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # Get frame info
-    frame_result = gdb_session.get_frame_info()
+    frame_result = call_gdb_tool("gdb_get_frame_info", {"session_id": session_id})
     assert frame_result["status"] == "success"
     assert "frame" in frame_result
     frame = frame_result["frame"]
@@ -625,60 +687,60 @@ def test_get_frame_info(gdb_session, compiled_program):
 
 
 @pytest.mark.integration
-def test_select_frame(gdb_session, compiled_program):
+def test_select_frame(session_id):
     """Test selecting a specific frame in the call stack."""
-    gdb_session.start(program=compiled_program)
 
     # Set breakpoint in add function (called from calculate)
-    gdb_session.set_breakpoint("add")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "add"})
 
     # Run to breakpoint
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # Get backtrace to see how many frames we have
-    backtrace = gdb_session.get_backtrace()
+    backtrace = call_gdb_tool("gdb_get_backtrace", {"session_id": session_id})
     assert backtrace["status"] == "success"
     assert backtrace["count"] >= 2  # Should have at least add and its caller
 
     # Select frame 0 (current frame - should be add)
-    select_result = gdb_session.select_frame(0)
+    select_result = call_gdb_tool("gdb_select_frame", {"session_id": session_id, "frame_number": 0})
     assert select_result["status"] == "success"
     assert select_result["frame_number"] == 0
 
     # Select frame 1 (caller frame)
     if backtrace["count"] >= 2:
-        select_result = gdb_session.select_frame(1)
+        select_result = call_gdb_tool(
+            "gdb_select_frame", {"session_id": session_id, "frame_number": 1}
+        )
         assert select_result["status"] == "success"
         assert select_result["frame_number"] == 1
 
 
 @pytest.mark.integration
-def test_frame_selection_and_variables(gdb_session, compiled_program):
+def test_frame_selection_and_variables(session_id):
     """Test that frame selection affects variable inspection."""
-    gdb_session.start(program=compiled_program)
 
     # Set breakpoint in add function
-    gdb_session.set_breakpoint("add")
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "add"})
 
     # Run to breakpoint
-    gdb_session.run()
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
 
     # Step to get into the function
-    gdb_session.next()
+    call_gdb_tool("gdb_next", {"session_id": session_id})
 
     # Get backtrace
-    backtrace = gdb_session.get_backtrace()
+    backtrace = call_gdb_tool("gdb_get_backtrace", {"session_id": session_id})
     assert backtrace["count"] >= 2
 
     # Select frame 0 (add function)
-    gdb_session.select_frame(0)
-    vars_frame0 = gdb_session.get_variables(frame=0)
+    call_gdb_tool("gdb_select_frame", {"session_id": session_id, "frame_number": 0})
+    vars_frame0 = call_gdb_tool("gdb_get_variables", {"session_id": session_id, "frame": 0})
     assert vars_frame0["status"] == "success"
 
     # Select frame 1 (caller)
     if backtrace["count"] >= 2:
-        gdb_session.select_frame(1)
-        vars_frame1 = gdb_session.get_variables(frame=1)
+        call_gdb_tool("gdb_select_frame", {"session_id": session_id, "frame_number": 1})
+        vars_frame1 = call_gdb_tool("gdb_get_variables", {"session_id": session_id, "frame": 1})
         assert vars_frame1["status"] == "success"
         # Variables should be different in different frames
         # (though we can't guarantee the exact variable names)

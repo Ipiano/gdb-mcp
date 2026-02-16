@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from typing import Any, Optional
 from mcp.server import Server
 from mcp.types import Tool, TextContent
@@ -18,8 +19,66 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global GDB session instance
-gdb_session = GDBSession()
+
+class SessionManager:
+    """
+    Manages multiple GDB debugging sessions.
+
+    Thread-safe session management with simple integer session IDs.
+    Sessions are created, retrieved by ID, and explicitly removed.
+    """
+
+    def __init__(self):
+        """Initialize the session manager with empty session storage."""
+        self._sessions: dict[int, GDBSession] = {}
+        self._next_session_id: int = 1
+        self._lock = threading.Lock()
+
+    def create_session(self) -> int:
+        """
+        Create a new GDB session and return its unique session ID.
+
+        Returns:
+            Integer session ID (starts at 1, monotonically increasing)
+        """
+        with self._lock:
+            session_id = self._next_session_id
+            self._next_session_id += 1
+            self._sessions[session_id] = GDBSession()
+        return session_id
+
+    def get_session(self, session_id: int) -> Optional[GDBSession]:
+        """
+        Retrieve a GDB session by its ID.
+
+        Args:
+            session_id: The session ID to look up
+
+        Returns:
+            GDBSession instance if found, None otherwise
+        """
+        with self._lock:
+            return self._sessions.get(session_id)
+
+    def remove_session(self, session_id: int) -> bool:
+        """
+        Remove a GDB session by its ID.
+
+        Args:
+            session_id: The session ID to remove
+
+        Returns:
+            True if session was removed, False if it didn't exist
+        """
+        with self._lock:
+            if session_id in self._sessions:
+                del self._sessions[session_id]
+                return True
+            return False
+
+
+# Global session manager instance
+session_manager = SessionManager()
 
 # Create MCP server instance
 app = Server("gdb-mcp-server")
@@ -38,7 +97,8 @@ class StartSessionArgs(BaseModel):
         description="Environment variables to set for the debugged program (e.g., {'LD_LIBRARY_PATH': '/custom/libs'})",
     )
     gdb_path: Optional[str] = Field(
-        None, description="Path to GDB executable (default: from GDB_PATH env var or 'gdb')"
+        None,
+        description="Path to GDB executable (default: from GDB_PATH env var or 'gdb')",
     )
     working_dir: Optional[str] = Field(
         None,
@@ -62,46 +122,61 @@ class StartSessionArgs(BaseModel):
 
 
 class ExecuteCommandArgs(BaseModel):
+    session_id: int = Field(..., description="Session ID from gdb_start_session")
     command: str = Field(..., description="GDB command to execute")
 
 
 class GetBacktraceArgs(BaseModel):
+    session_id: int = Field(..., description="Session ID from gdb_start_session")
     thread_id: Optional[int] = Field(None, description="Thread ID (None for current thread)")
     max_frames: int = Field(100, description="Maximum number of frames to retrieve")
 
 
 class SetBreakpointArgs(BaseModel):
+    session_id: int = Field(..., description="Session ID from gdb_start_session")
     location: str = Field(..., description="Breakpoint location (function, file:line, or *address)")
     condition: Optional[str] = Field(None, description="Conditional expression")
     temporary: bool = Field(False, description="Whether breakpoint is temporary")
 
 
 class EvaluateExpressionArgs(BaseModel):
+    session_id: int = Field(..., description="Session ID from gdb_start_session")
     expression: str = Field(..., description="C/C++ expression to evaluate")
 
 
 class GetVariablesArgs(BaseModel):
+    session_id: int = Field(..., description="Session ID from gdb_start_session")
     thread_id: Optional[int] = Field(None, description="Thread ID (None for current)")
     frame: int = Field(0, description="Frame number (0 is current)")
 
 
 class ThreadSelectArgs(BaseModel):
+    session_id: int = Field(..., description="Session ID from gdb_start_session")
     thread_id: int = Field(..., description="Thread ID to select")
 
 
 class BreakpointNumberArgs(BaseModel):
+    session_id: int = Field(..., description="Session ID from gdb_start_session")
     number: int = Field(..., description="Breakpoint number")
 
 
 class FrameSelectArgs(BaseModel):
+    session_id: int = Field(..., description="Session ID from gdb_start_session")
     frame_number: int = Field(..., description="Frame number (0 is current/innermost frame)")
 
 
 class CallFunctionArgs(BaseModel):
+    session_id: int = Field(..., description="Session ID from gdb_start_session")
     function_call: str = Field(
         ...,
         description="Function call expression (e.g., 'printf(\"hello\\n\")' or 'my_func(arg1, arg2)')",
     )
+
+
+class SessionIdArgs(BaseModel):
+    """Arguments for tools that only need session_id."""
+
+    session_id: int = Field(..., description="Session ID from gdb_start_session")
 
 
 # List available tools
@@ -124,7 +199,8 @@ async def list_tools() -> list[Tool]:
                 "working_dir (directory to run program from). "
                 "IMPORTANT for core dump debugging: Set 'sysroot' and 'solib-search-path' AFTER "
                 "loading the core (either via 'core' parameter or 'core-file' init_command) "
-                "for symbols to resolve correctly."
+                "for symbols to resolve correctly. "
+                "Returns a session_id integer that must be passed to all other GDB tools."
             ),
             inputSchema=StartSessionArgs.model_json_schema(),
         ),
@@ -140,28 +216,27 @@ async def list_tools() -> list[Tool]:
                 "gdb_call_function tool instead of 'call' command, as it provides better "
                 "structured output and can be separately permissioned. "
                 "Common examples: 'info breakpoints', 'info threads', 'run', 'print variable', "
-                "'list main', 'disassemble func'."
+                "'list main', 'disassemble func'. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
             inputSchema=ExecuteCommandArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_get_status",
-            description="Get the current status of the GDB session.",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            description=(
+                "Get the current status of the GDB session. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
+            ),
+            inputSchema=SessionIdArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_get_threads",
             description=(
                 "Get information about all threads in the debugged process, including "
-                "thread IDs, states, and the current thread."
+                "thread IDs, states, and the current thread. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            inputSchema=SessionIdArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_select_thread",
@@ -169,7 +244,8 @@ async def list_tools() -> list[Tool]:
                 "Select a specific thread to make it the current thread. "
                 "After selecting a thread, subsequent commands like gdb_get_backtrace, "
                 "gdb_get_variables, and gdb_evaluate_expression will operate on this thread. "
-                "Use gdb_get_threads to see available thread IDs."
+                "Use gdb_get_threads to see available thread IDs. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
             inputSchema=ThreadSelectArgs.model_json_schema(),
         ),
@@ -177,7 +253,8 @@ async def list_tools() -> list[Tool]:
             name="gdb_get_backtrace",
             description=(
                 "Get the stack backtrace for a specific thread or the current thread. "
-                "Shows function calls, file locations, and line numbers."
+                "Shows function calls, file locations, and line numbers. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
             inputSchema=GetBacktraceArgs.model_json_schema(),
         ),
@@ -188,7 +265,8 @@ async def list_tools() -> list[Tool]:
                 "Frame 0 is the innermost (current) frame, higher numbers are outer frames. "
                 "After selecting a frame, commands like gdb_get_variables and gdb_evaluate_expression "
                 "will operate in the context of that frame. "
-                "Use gdb_get_backtrace to see available frames and their numbers."
+                "Use gdb_get_backtrace to see available frames and their numbers. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
             inputSchema=FrameSelectArgs.model_json_schema(),
         ),
@@ -198,9 +276,10 @@ async def list_tools() -> list[Tool]:
                 "Get information about the current stack frame. "
                 "Returns details about the currently selected frame including function name, "
                 "file location, line number, and address. "
-                "Use gdb_select_frame to change the current frame first if needed."
+                "Use gdb_select_frame to change the current frame first if needed. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
-            inputSchema={"type": "object", "properties": {}, "required": []},
+            inputSchema=SessionIdArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_set_breakpoint",
@@ -208,7 +287,8 @@ async def list_tools() -> list[Tool]:
                 "Set a breakpoint at a function, file:line, or address. "
                 "Supports conditional breakpoints and temporary breakpoints. "
                 "Returns breakpoint details including number, address, and location. "
-                "Use gdb_list_breakpoints to verify breakpoints were set correctly."
+                "Use gdb_list_breakpoints to verify breakpoints were set correctly. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
             inputSchema=SetBreakpointArgs.model_json_schema(),
         ),
@@ -220,19 +300,18 @@ async def list_tools() -> list[Tool]:
                 "enabled status, address, function name, source file, line number, and hit count. "
                 "Use this to verify breakpoints were set correctly, check which have been hit "
                 "(times field), and inspect their exact locations. "
-                "Much easier to filter and analyze than text output."
+                "Much easier to filter and analyze than text output. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            inputSchema=SessionIdArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_delete_breakpoint",
             description=(
                 "Delete a breakpoint by its number. "
                 "Use gdb_list_breakpoints to see breakpoint numbers. "
-                "Once deleted, the breakpoint cannot be recovered."
+                "Once deleted, the breakpoint cannot be recovered. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
             inputSchema=BreakpointNumberArgs.model_json_schema(),
         ),
@@ -240,7 +319,8 @@ async def list_tools() -> list[Tool]:
             name="gdb_enable_breakpoint",
             description=(
                 "Enable a previously disabled breakpoint by its number. "
-                "Enabled breakpoints will pause execution when hit."
+                "Enabled breakpoints will pause execution when hit. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
             inputSchema=BreakpointNumberArgs.model_json_schema(),
         ),
@@ -249,7 +329,8 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Disable a breakpoint by its number without deleting it. "
                 "Disabled breakpoints are not hit but remain in the breakpoint list. "
-                "Use gdb_enable_breakpoint to re-enable it later."
+                "Use gdb_enable_breakpoint to re-enable it later. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
             inputSchema=BreakpointNumberArgs.model_json_schema(),
         ),
@@ -259,36 +340,30 @@ async def list_tools() -> list[Tool]:
                 "Continue execution of the program until next breakpoint or completion. "
                 "IMPORTANT: Only use this when the program is PAUSED (e.g., at a breakpoint). "
                 "If the program hasn't been started yet, use gdb_execute_command with 'run' instead. "
-                "If the program is already running, this will fail - use gdb_interrupt to pause it first."
+                "If the program is already running, this will fail - use gdb_interrupt to pause it first. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            inputSchema=SessionIdArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_step",
             description=(
                 "Step into the next instruction (enters function calls). "
                 "IMPORTANT: Only works when program is PAUSED at a specific location. "
-                "Use this for single-stepping through code to debug line-by-line."
+                "Use this for single-stepping through code to debug line-by-line. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            inputSchema=SessionIdArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_next",
             description=(
                 "Step over to the next line (doesn't enter function calls). "
                 "IMPORTANT: Only works when program is PAUSED at a specific location. "
-                "Use this to step over function calls without entering them."
+                "Use this to step over function calls without entering them. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            inputSchema=SessionIdArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_interrupt",
@@ -298,41 +373,43 @@ async def list_tools() -> list[Tool]:
                 "2) You want to pause execution to inspect state or set breakpoints, "
                 "3) The program appears stuck or you want to see where it is. "
                 "After interrupting, you can use other commands like gdb_get_backtrace, "
-                "gdb_get_variables, or gdb_continue."
+                "gdb_get_variables, or gdb_continue. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            inputSchema=SessionIdArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_evaluate_expression",
             description=(
                 "Evaluate a C/C++ expression in the current context and return its value. "
-                "Can access variables, dereference pointers, call functions, etc."
+                "Can access variables, dereference pointers, call functions, etc. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
             inputSchema=EvaluateExpressionArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_get_variables",
-            description="Get local variables for a specific stack frame in a thread.",
+            description=(
+                "Get local variables for a specific stack frame in a thread. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
+            ),
             inputSchema=GetVariablesArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_get_registers",
-            description="Get CPU register values for the current frame.",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            description=(
+                "Get CPU register values for the current frame. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
+            ),
+            inputSchema=SessionIdArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_stop_session",
-            description="Stop the current GDB session and clean up resources.",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            description=(
+                "Stop the current GDB session and clean up resources. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
+            ),
+            inputSchema=SessionIdArgs.model_json_schema(),
         ),
         Tool(
             name="gdb_call_function",
@@ -345,7 +422,8 @@ async def list_tools() -> list[Tool]:
                 "- System calls via wrappers "
                 "The function executes with full privileges of the debugged process. "
                 "Use with caution as it may have side effects and modify program state. "
-                "Examples: 'printf(\"debug: x=%d\\n\", x)', 'my_cleanup_func()', 'strlen(str)'"
+                "Examples: 'printf(\"debug: x=%d\\n\", x)', 'my_cleanup_func()', 'strlen(str)'. "
+                "Requires session_id parameter (obtained from gdb_start_session)."
             ),
             inputSchema=CallFunctionArgs.model_json_schema(),
         ),
@@ -360,7 +438,13 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     try:
         if name == "gdb_start_session":
             args = StartSessionArgs(**arguments)
-            result = gdb_session.start(
+            session_id = session_manager.create_session()
+            session = session_manager.get_session(session_id)
+
+            if session is None:
+                raise RuntimeError(f"Failed to create session {session_id}")
+
+            result = session.start(
                 program=args.program,
                 args=args.args,
                 init_commands=args.init_commands,
@@ -369,91 +453,103 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 working_dir=args.working_dir,
                 core=args.core,
             )
-
-        elif name == "gdb_execute_command":
-            exec_args: ExecuteCommandArgs = ExecuteCommandArgs(**arguments)
-            result = gdb_session.execute_command(command=exec_args.command)
-
-        elif name == "gdb_get_status":
-            result = gdb_session.get_status()
-
-        elif name == "gdb_get_threads":
-            result = gdb_session.get_threads()
-
-        elif name == "gdb_select_thread":
-            thread_args: ThreadSelectArgs = ThreadSelectArgs(**arguments)
-            result = gdb_session.select_thread(thread_id=thread_args.thread_id)
-
-        elif name == "gdb_get_backtrace":
-            backtrace_args: GetBacktraceArgs = GetBacktraceArgs(**arguments)
-            result = gdb_session.get_backtrace(
-                thread_id=backtrace_args.thread_id, max_frames=backtrace_args.max_frames
-            )
-
-        elif name == "gdb_select_frame":
-            frame_args: FrameSelectArgs = FrameSelectArgs(**arguments)
-            result = gdb_session.select_frame(frame_number=frame_args.frame_number)
-
-        elif name == "gdb_get_frame_info":
-            result = gdb_session.get_frame_info()
-
-        elif name == "gdb_set_breakpoint":
-            bp_args: SetBreakpointArgs = SetBreakpointArgs(**arguments)
-            result = gdb_session.set_breakpoint(
-                location=bp_args.location, condition=bp_args.condition, temporary=bp_args.temporary
-            )
-
-        elif name == "gdb_list_breakpoints":
-            result = gdb_session.list_breakpoints()
-
-        elif name == "gdb_delete_breakpoint":
-            del_bp_args: BreakpointNumberArgs = BreakpointNumberArgs(**arguments)
-            result = gdb_session.delete_breakpoint(number=del_bp_args.number)
-
-        elif name == "gdb_enable_breakpoint":
-            en_bp_args: BreakpointNumberArgs = BreakpointNumberArgs(**arguments)
-            result = gdb_session.enable_breakpoint(number=en_bp_args.number)
-
-        elif name == "gdb_disable_breakpoint":
-            dis_bp_args: BreakpointNumberArgs = BreakpointNumberArgs(**arguments)
-            result = gdb_session.disable_breakpoint(number=dis_bp_args.number)
-
-        elif name == "gdb_continue":
-            result = gdb_session.continue_execution()
-
-        elif name == "gdb_step":
-            result = gdb_session.step()
-
-        elif name == "gdb_next":
-            result = gdb_session.next()
-
-        elif name == "gdb_interrupt":
-            result = gdb_session.interrupt()
-
-        elif name == "gdb_evaluate_expression":
-            eval_args: EvaluateExpressionArgs = EvaluateExpressionArgs(**arguments)
-            result = gdb_session.evaluate_expression(eval_args.expression)
-
-        elif name == "gdb_get_variables":
-            var_args: GetVariablesArgs = GetVariablesArgs(**arguments)
-            result = gdb_session.get_variables(thread_id=var_args.thread_id, frame=var_args.frame)
-
-        elif name == "gdb_get_registers":
-            result = gdb_session.get_registers()
-
-        elif name == "gdb_stop_session":
-            result = gdb_session.stop()
-
-        elif name == "gdb_call_function":
-            call_args: CallFunctionArgs = CallFunctionArgs(**arguments)
-            result = gdb_session.call_function(function_call=call_args.function_call)
+            result["session_id"] = session_id
 
         else:
-            result = {"status": "error", "message": f"Unknown tool: {name}"}
+            session_id = arguments.get("session_id")
+            session = session_manager.get_session(session_id)
 
-        # Format result as text
+            if session is None:
+                result = {
+                    "status": "error",
+                    "message": f"Invalid session_id: {session_id}. Use gdb_start_session to create a new session.",
+                }
+            elif name == "gdb_execute_command":
+                exec_args: ExecuteCommandArgs = ExecuteCommandArgs(**arguments)
+                result = session.execute_command(command=exec_args.command)
+
+            elif name == "gdb_get_status":
+                result = session.get_status()
+
+            elif name == "gdb_get_threads":
+                result = session.get_threads()
+
+            elif name == "gdb_select_thread":
+                thread_args: ThreadSelectArgs = ThreadSelectArgs(**arguments)
+                result = session.select_thread(thread_id=thread_args.thread_id)
+
+            elif name == "gdb_get_backtrace":
+                backtrace_args: GetBacktraceArgs = GetBacktraceArgs(**arguments)
+                result = session.get_backtrace(
+                    thread_id=backtrace_args.thread_id,
+                    max_frames=backtrace_args.max_frames,
+                )
+
+            elif name == "gdb_select_frame":
+                frame_args: FrameSelectArgs = FrameSelectArgs(**arguments)
+                result = session.select_frame(frame_number=frame_args.frame_number)
+
+            elif name == "gdb_get_frame_info":
+                result = session.get_frame_info()
+
+            elif name == "gdb_set_breakpoint":
+                bp_args: SetBreakpointArgs = SetBreakpointArgs(**arguments)
+                result = session.set_breakpoint(
+                    location=bp_args.location,
+                    condition=bp_args.condition,
+                    temporary=bp_args.temporary,
+                )
+
+            elif name == "gdb_list_breakpoints":
+                result = session.list_breakpoints()
+
+            elif name == "gdb_delete_breakpoint":
+                del_bp_args: BreakpointNumberArgs = BreakpointNumberArgs(**arguments)
+                result = session.delete_breakpoint(number=del_bp_args.number)
+
+            elif name == "gdb_enable_breakpoint":
+                en_bp_args: BreakpointNumberArgs = BreakpointNumberArgs(**arguments)
+                result = session.enable_breakpoint(number=en_bp_args.number)
+
+            elif name == "gdb_disable_breakpoint":
+                dis_bp_args: BreakpointNumberArgs = BreakpointNumberArgs(**arguments)
+                result = session.disable_breakpoint(number=dis_bp_args.number)
+
+            elif name == "gdb_continue":
+                result = session.continue_execution()
+
+            elif name == "gdb_step":
+                result = session.step()
+
+            elif name == "gdb_next":
+                result = session.next()
+
+            elif name == "gdb_interrupt":
+                result = session.interrupt()
+
+            elif name == "gdb_evaluate_expression":
+                eval_args: EvaluateExpressionArgs = EvaluateExpressionArgs(**arguments)
+                result = session.evaluate_expression(eval_args.expression)
+
+            elif name == "gdb_get_variables":
+                var_args: GetVariablesArgs = GetVariablesArgs(**arguments)
+                result = session.get_variables(thread_id=var_args.thread_id, frame=var_args.frame)
+
+            elif name == "gdb_get_registers":
+                result = session.get_registers()
+
+            elif name == "gdb_stop_session":
+                result = session.stop()
+                session_manager.remove_session(session_id)
+
+            elif name == "gdb_call_function":
+                call_args: CallFunctionArgs = CallFunctionArgs(**arguments)
+                result = session.call_function(function_call=call_args.function_call)
+
+            else:
+                result = {"status": "error", "message": f"Unknown tool: {name}"}
+
         result_text = json.dumps(result, indent=2)
-
         return [TextContent(type="text", text=result_text)]
 
     except Exception as e:

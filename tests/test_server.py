@@ -60,7 +60,8 @@ class TestExecuteCommandArgs:
 
     def test_command_arg(self):
         """Test command argument."""
-        args = ExecuteCommandArgs(command="info threads")
+        args = ExecuteCommandArgs(session_id=1, command="info threads")
+        assert args.session_id == 1
         assert args.command == "info threads"
 
 
@@ -69,13 +70,15 @@ class TestGetBacktraceArgs:
 
     def test_defaults(self):
         """Test default values."""
-        args = GetBacktraceArgs()
+        args = GetBacktraceArgs(session_id=1)
+        assert args.session_id == 1
         assert args.thread_id is None
         assert args.max_frames == 100
 
     def test_with_thread_id(self):
         """Test with specific thread ID."""
-        args = GetBacktraceArgs(thread_id=5, max_frames=50)
+        args = GetBacktraceArgs(session_id=2, thread_id=5, max_frames=50)
+        assert args.session_id == 2
         assert args.thread_id == 5
         assert args.max_frames == 50
 
@@ -90,14 +93,18 @@ class TestSetBreakpointArgs:
 
     def test_minimal_breakpoint(self):
         """Test minimal breakpoint (just location)."""
-        args = SetBreakpointArgs(location="main")
+        args = SetBreakpointArgs(session_id=1, location="main")
+        assert args.session_id == 1
         assert args.location == "main"
         assert args.condition is None
         assert args.temporary is False
 
     def test_conditional_breakpoint(self):
         """Test conditional breakpoint."""
-        args = SetBreakpointArgs(location="foo.c:42", condition="x > 10", temporary=True)
+        args = SetBreakpointArgs(
+            session_id=2, location="foo.c:42", condition="x > 10", temporary=True
+        )
+        assert args.session_id == 2
         assert args.location == "foo.c:42"
         assert args.condition == "x > 10"
         assert args.temporary is True
@@ -113,7 +120,8 @@ class TestEvaluateExpressionArgs:
 
     def test_expression(self):
         """Test with expression."""
-        args = EvaluateExpressionArgs(expression="x + y")
+        args = EvaluateExpressionArgs(session_id=1, expression="x + y")
+        assert args.session_id == 1
         assert args.expression == "x + y"
 
 
@@ -122,13 +130,15 @@ class TestGetVariablesArgs:
 
     def test_defaults(self):
         """Test default values."""
-        args = GetVariablesArgs()
+        args = GetVariablesArgs(session_id=1)
+        assert args.session_id == 1
         assert args.thread_id is None
         assert args.frame == 0
 
     def test_with_values(self):
         """Test with specific values."""
-        args = GetVariablesArgs(thread_id=3, frame=2)
+        args = GetVariablesArgs(session_id=2, thread_id=3, frame=2)
+        assert args.session_id == 2
         assert args.thread_id == 3
         assert args.frame == 2
 
@@ -147,12 +157,94 @@ class TestCallFunctionArgs:
         """Test function_call argument."""
         from gdb_mcp.server import CallFunctionArgs
 
-        args = CallFunctionArgs(function_call='printf("hello")')
+        args = CallFunctionArgs(session_id=1, function_call='printf("hello")')
+        assert args.session_id == 1
         assert args.function_call == 'printf("hello")'
 
     def test_function_call_with_args(self):
         """Test function_call with multiple arguments."""
         from gdb_mcp.server import CallFunctionArgs
 
-        args = CallFunctionArgs(function_call='snprintf(buf, 100, "%d", x)')
+        args = CallFunctionArgs(session_id=2, function_call='snprintf(buf, 100, "%d", x)')
+        assert args.session_id == 2
         assert args.function_call == 'snprintf(buf, 100, "%d", x)'
+
+
+class TestSessionIdRequired:
+    """Test that session_id is required in all tool argument models."""
+
+    def test_execute_command_requires_session_id(self):
+        """Test ExecuteCommandArgs requires session_id."""
+        with pytest.raises(ValidationError) as exc_info:
+            ExecuteCommandArgs(command="info threads")
+        assert "session_id" in str(exc_info.value)
+
+    def test_get_backtrace_requires_session_id(self):
+        """Test GetBacktraceArgs requires session_id."""
+        with pytest.raises(ValidationError) as exc_info:
+            GetBacktraceArgs()
+        assert "session_id" in str(exc_info.value)
+
+    def test_set_breakpoint_requires_session_id(self):
+        """Test SetBreakpointArgs requires session_id."""
+        with pytest.raises(ValidationError) as exc_info:
+            SetBreakpointArgs(location="main")
+        assert "session_id" in str(exc_info.value)
+
+    def test_evaluate_expression_requires_session_id(self):
+        """Test EvaluateExpressionArgs requires session_id."""
+        with pytest.raises(ValidationError) as exc_info:
+            EvaluateExpressionArgs(expression="x + y")
+        assert "session_id" in str(exc_info.value)
+
+    def test_get_variables_requires_session_id(self):
+        """Test GetVariablesArgs requires session_id."""
+        with pytest.raises(ValidationError) as exc_info:
+            GetVariablesArgs()
+        assert "session_id" in str(exc_info.value)
+
+    def test_thread_select_requires_session_id(self):
+        """Test ThreadSelectArgs requires session_id."""
+        from gdb_mcp.server import ThreadSelectArgs
+
+        with pytest.raises(ValidationError) as exc_info:
+            ThreadSelectArgs(thread_id=1)
+        assert "session_id" in str(exc_info.value)
+
+    def test_frame_select_requires_session_id(self):
+        """Test FrameSelectArgs requires session_id."""
+        from gdb_mcp.server import FrameSelectArgs
+
+        with pytest.raises(ValidationError) as exc_info:
+            FrameSelectArgs(frame_number=0)
+        assert "session_id" in str(exc_info.value)
+
+    def test_breakpoint_number_requires_session_id(self):
+        """Test BreakpointNumberArgs requires session_id."""
+        from gdb_mcp.server import BreakpointNumberArgs
+
+        with pytest.raises(ValidationError) as exc_info:
+            BreakpointNumberArgs(number=1)
+        assert "session_id" in str(exc_info.value)
+
+    def test_call_function_requires_session_id(self):
+        """Test CallFunctionArgs requires session_id."""
+        from gdb_mcp.server import CallFunctionArgs
+
+        with pytest.raises(ValidationError) as exc_info:
+            CallFunctionArgs(function_call='printf("hello")')
+        assert "session_id" in str(exc_info.value)
+
+    def test_session_id_validation_success(self):
+        """Test that models accept session_id correctly."""
+        # ExecuteCommandArgs
+        args1 = ExecuteCommandArgs(session_id=1, command="info threads")
+        assert args1.session_id == 1
+
+        # GetBacktraceArgs
+        args2 = GetBacktraceArgs(session_id=2)
+        assert args2.session_id == 2
+
+        # SetBreakpointArgs
+        args3 = SetBreakpointArgs(session_id=3, location="main")
+        assert args3.session_id == 3
