@@ -204,6 +204,32 @@ def test_set_and_list_breakpoints(session_id):
 
 
 @pytest.mark.integration
+def test_hardware_breakpoint(session_id):
+    """Test setting a hardware breakpoint.
+
+    Hardware breakpoints use CPU debug registers, which are only available
+    when a process is running. We first run to main with a regular breakpoint,
+    then set the hardware breakpoint on a different function.
+    """
+    # Start the program first - hardware breakpoints need a running process
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
+
+    # Now set a hardware breakpoint on the add function
+    bp_result = call_gdb_tool(
+        "gdb_set_breakpoint",
+        {
+            "session_id": session_id,
+            "location": "add",
+            "hardware": True,
+        },
+    )
+    assert bp_result["status"] == "success"
+    bp = bp_result["breakpoint"]
+    assert bp["type"] == "hw breakpoint"
+
+
+@pytest.mark.integration
 def test_run_and_hit_breakpoint(session_id):
     """Test running the program and hitting a breakpoint."""
     # Set breakpoint at main

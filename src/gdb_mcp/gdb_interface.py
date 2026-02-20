@@ -826,7 +826,11 @@ class GDBSession:
         }
 
     def set_breakpoint(
-        self, location: str, condition: Optional[str] = None, temporary: bool = False
+        self,
+        location: str,
+        condition: Optional[str] = None,
+        temporary: bool = False,
+        hardware: bool = False,
     ) -> dict[str, Any]:
         """
         Set a breakpoint at the specified location.
@@ -835,6 +839,7 @@ class GDBSession:
             location: Location (function name, file:line, *address)
             condition: Optional condition expression
             temporary: Whether this is a temporary breakpoint
+            hardware: Whether to use a hardware-assisted breakpoint
 
         Returns:
             Dict with breakpoint information
@@ -843,6 +848,9 @@ class GDBSession:
 
         if temporary:
             cmd_parts.append("-t")
+
+        if hardware:
+            cmd_parts.append("-h")
 
         if condition:
             # Escape backslashes and quotes in the condition

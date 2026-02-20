@@ -98,6 +98,7 @@ class TestSetBreakpointArgs:
         assert args.location == "main"
         assert args.condition is None
         assert args.temporary is False
+        assert args.hardware is False
 
     def test_conditional_breakpoint(self):
         """Test conditional breakpoint."""
@@ -108,6 +109,13 @@ class TestSetBreakpointArgs:
         assert args.location == "foo.c:42"
         assert args.condition == "x > 10"
         assert args.temporary is True
+
+    def test_hardware_breakpoint(self):
+        """Test hardware breakpoint."""
+        args = SetBreakpointArgs(session_id=1, location="main", hardware=True)
+        assert args.location == "main"
+        assert args.hardware is True
+        assert args.temporary is False
 
 
 class TestEvaluateExpressionArgs:
