@@ -114,6 +114,17 @@ structured output and can be separately permissioned.
 - `list` - Show source code
 - `disassemble` - Show assembly code
 
+**Multi-line commands:**
+
+Multi-line constructs (`commands`, `define`, `python`, `if/else/end`, `while/end`)
+are supported. Separate lines with `\n`:
+
+```
+command: "commands 1\nsilent\nprint x\ncontinue\nend"
+command: "define mycmd\nprint $arg0\nend"
+command: "python\nimport gdb\nprint(gdb.VERSION)\nend"
+```
+
 ### `gdb_call_function`
 Call a function in the target process.
 

@@ -744,3 +744,56 @@ def test_frame_selection_and_variables(session_id):
         assert vars_frame1["status"] == "success"
         # Variables should be different in different frames
         # (though we can't guarantee the exact variable names)
+
+
+
+# Integration tests for multi-line commands
+
+
+@pytest.mark.integration
+def test_multiline_define(session_id):
+    """Test defining a custom command with a multi-line 'define' block."""
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "add"})
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
+
+    # Define a custom command
+    result = call_gdb_tool("gdb_execute_command", {
+        "session_id": session_id,
+        "command": "define show_args\nprint a\nprint b\nend",
+    })
+    assert result["status"] == "success"
+
+    # Call the custom command
+    result = call_gdb_tool("gdb_execute_command", {
+        "session_id": session_id,
+        "command": "show_args",
+    })
+    assert result["status"] == "success"
+    assert "$1" in result["output"]
+    assert "$2" in result["output"]
+
+
+@pytest.mark.integration
+def test_multiline_commands_block(session_id):
+    """Test attaching commands to a breakpoint with a multi-line 'commands' block."""
+    bp = call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
+    assert bp["status"] == "success"
+    bp_number = bp["breakpoint"]["number"]
+
+    # Attach commands to the breakpoint
+    result = call_gdb_tool("gdb_execute_command", {
+        "session_id": session_id,
+        "command": f"commands {bp_number}\nsilent\nprint \"hit main\"\ncontinue\nend",
+    })
+    assert result["status"] == "success"
+
+
+@pytest.mark.integration
+def test_multiline_python_block(session_id):
+    """Test executing a multi-line Python block."""
+    result = call_gdb_tool("gdb_execute_command", {
+        "session_id": session_id,
+        "command": "python\nimport sys\nprint('python version:', sys.version_info.major)\nend",
+    })
+    assert result["status"] == "success"
+    assert "python version:" in result["output"]

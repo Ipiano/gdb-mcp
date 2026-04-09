@@ -210,6 +210,8 @@ async def list_tools() -> list[Tool]:
                 "Execute a GDB command. Supports both CLI and MI commands. "
                 "CLI commands (like 'info breakpoints', 'list', 'print x') are automatically "
                 "handled and their output is formatted for readability. "
+                "Multi-line commands (like 'commands', 'define', 'python') are supported — "
+                "separate lines with \\n (e.g., 'commands 1\\nprint x\\ncontinue\\nend'). "
                 "MI commands (starting with '-', like '-break-list', '-exec-run') return "
                 "structured data. "
                 "NOTE: For calling functions in the target process, prefer using the dedicated "
