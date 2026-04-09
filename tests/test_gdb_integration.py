@@ -243,6 +243,129 @@ def test_step_through_functions(session_id):
 
 
 @pytest.mark.integration
+def test_execution_commands_return_stop_reason(session_id):
+    """Test that continue/step/next block and return stop reason and frame info."""
+    # Set breakpoints at main and add
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "main"})
+    call_gdb_tool("gdb_set_breakpoint", {"session_id": session_id, "location": "add"})
+
+    # Run to main - should stop and report breakpoint-hit
+    call_gdb_tool("gdb_execute_command", {"session_id": session_id, "command": "run"})
+
+    # Continue to add - should block until breakpoint hit
+    cont_result = call_gdb_tool("gdb_continue", {"session_id": session_id})
+    assert cont_result["status"] == "success"
+    assert cont_result["stopped_reason"] == "breakpoint-hit"
+    assert "frame" in cont_result
+    assert "thread_id" in cont_result
+
+    # Step should return frame info
+    step_result = call_gdb_tool("gdb_step", {"session_id": session_id})
+    assert step_result["status"] == "success"
+    assert "stopped_reason" in step_result
+    assert "frame" in step_result
+
+    # Next should return frame info
+    next_result = call_gdb_tool("gdb_next", {"session_id": session_id})
+    assert next_result["status"] == "success"
+    assert "stopped_reason" in next_result
+    assert "frame" in next_result
+
+
+# Test program that sleeps between breakpoints to verify blocking behavior
+TEST_CPP_SLEEP_PROGRAM = """
+#include <unistd.h>
+
+void before_sleep() {
+    // breakpoint target
+}
+
+void after_sleep() {
+    // breakpoint target
+}
+
+int main() {
+    before_sleep();
+    sleep(2);
+    after_sleep();
+    return 0;
+}
+"""
+
+
+@pytest.fixture
+def sleep_session_id():
+    """
+    Fixture that compiles a program with a sleep() call and starts a GDB session.
+    Used to test that execution commands truly block until the target stops.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source_file = Path(tmpdir) / "sleep_program.cpp"
+        executable_file = Path(tmpdir) / "sleep_program"
+
+        source_file.write_text(TEST_CPP_SLEEP_PROGRAM)
+
+        compile_result = subprocess.run(
+            ["g++", "-g", "-O0", "-o", str(executable_file), str(source_file)],
+            capture_output=True,
+            text=True,
+        )
+
+        if compile_result.returncode != 0:
+            pytest.fail(f"Failed to compile sleep program: {compile_result.stderr}")
+
+        init_commands = [
+            "set disable-randomization on",
+            "set startup-with-shell off",
+        ]
+
+        result = call_gdb_tool(
+            "gdb_start_session",
+            {
+                "program": str(executable_file),
+                "init_commands": init_commands,
+            },
+        )
+
+        assert result["status"] == "success", f"Failed to start session: {result}"
+        session_id = result["session_id"]
+
+        yield session_id
+
+        try:
+            call_gdb_tool("gdb_stop_session", {"session_id": session_id})
+        except Exception:
+            pass
+
+
+@pytest.mark.integration
+def test_continue_blocks_during_sleep(sleep_session_id):
+    """Test that gdb_continue blocks until the target actually stops.
+
+    Uses a program that sleeps for 2 seconds between breakpoints.
+    If continue returned immediately (the old bug), it would return
+    a 'running' status instead of 'breakpoint-hit' with frame info.
+    """
+    # Set breakpoint after the sleep
+    call_gdb_tool("gdb_set_breakpoint", {
+        "session_id": sleep_session_id, "location": "after_sleep",
+    })
+
+    # Run the program - it will call before_sleep(), then sleep(2), then hit after_sleep()
+    call_gdb_tool("gdb_execute_command", {
+        "session_id": sleep_session_id, "command": "run",
+    })
+
+    # This continue must block for ~2 seconds while sleep() runs.
+    # Without the blocking fix, this would return immediately with no stop info.
+    cont_result = call_gdb_tool("gdb_continue", {"session_id": sleep_session_id})
+    assert cont_result["status"] == "success"
+    assert cont_result["stopped_reason"] == "breakpoint-hit"
+    assert "frame" in cont_result
+    assert cont_result["frame"]["func"] == "after_sleep"
+
+
+@pytest.mark.integration
 def test_inspect_variables(session_id):
     """Test inspecting variable values."""
     # Set breakpoint in the add function

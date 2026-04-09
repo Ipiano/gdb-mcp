@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT_SEC = 30
 FILE_LOAD_TIMEOUT_SEC = 300  # 5 minutes for loading core/executable files
 INTERRUPT_RESPONSE_TIMEOUT_SEC = 2
+EXECUTION_TIMEOUT_SEC = 300  # 5 minutes for execution commands (continue, step, etc.)
 POLL_TIMEOUT_SEC = 0.1
 INIT_COMMAND_DELAY_SEC = 0.5
 
@@ -34,6 +35,7 @@ class GDBSession:
         self.controller: Optional[GdbController] = None
         self.is_running = False
         self.target_loaded = False
+        self.target_running = False  # Whether the inferior is currently executing
         self.original_cwd: Optional[str] = None  # Store original working directory
         self._command_token = INITIAL_COMMAND_TOKEN
 
@@ -545,6 +547,203 @@ class GDBSession:
             "timed_out": True,
         }
 
+    def _send_execution_command(
+        self, command: str, timeout_sec: float = EXECUTION_TIMEOUT_SEC
+    ) -> dict[str, Any]:
+        """
+        Send an execution command and wait for the target to stop.
+
+        Unlike _send_command_and_wait_for_prompt which returns on the result record,
+        this method continues reading after ^running until a *stopped notification
+        arrives. This is needed for -exec-continue, -exec-step, -exec-next, -exec-run.
+
+        Args:
+            command: GDB/MI execution command (e.g., "-exec-continue")
+            timeout_sec: Maximum inactivity time waiting for target to stop
+
+        Returns:
+            Dict with stop reason, frame info, etc.
+        """
+        import time
+
+        if not self.controller:
+            return {"status": "error", "message": "No active GDB session"}
+
+        if not self._is_gdb_alive():
+            return {
+                "status": "error",
+                "message": "GDB process has exited - cannot execute command",
+                "command": command,
+            }
+
+        # Get next token and increment counter
+        token = self._command_token
+        self._command_token += 1
+
+        tokenized_command = f"{token}{command}"
+        logger.debug(f"Sending execution command: {tokenized_command}")
+
+        try:
+            self.controller.io_manager.stdin.write((tokenized_command + "\n").encode())
+            self.controller.io_manager.stdin.flush()
+        except (BrokenPipeError, OSError) as e:
+            logger.error(f"Failed to send command: {e}")
+            return {"status": "error", "message": f"Failed to send command: {e}"}
+
+        # Read responses in two phases:
+        # Phase 1: Wait for ^running acknowledgment (command accepted)
+        # Phase 2: Wait for *stopped notification (target stopped)
+        # The timeout is an inactivity timeout that resets on each response received.
+        start_time = time.time()
+        last_activity_time = start_time
+        last_alive_check = start_time
+        got_running = False
+
+        while time.time() - last_activity_time < timeout_sec:
+            # Periodic alive check (every 1 second)
+            elapsed = time.time() - start_time
+            if elapsed - last_alive_check >= 1.0:
+                if not self._is_gdb_alive():
+                    exit_code = None
+                    try:
+                        if hasattr(self.controller, "gdb_process") and isinstance(
+                            self.controller.gdb_process, subprocess.Popen
+                        ):
+                            exit_code = self.controller.gdb_process.poll()
+                    except Exception:
+                        pass
+
+                    error_details = f"GDB process exited unexpectedly after {elapsed:.1f}s"
+                    if exit_code is not None:
+                        error_details += f" (exit code {exit_code})"
+
+                    logger.error(error_details)
+                    return {
+                        "status": "error",
+                        "message": error_details,
+                        "command": command,
+                    }
+                last_alive_check = elapsed
+
+            try:
+                responses = self.controller.get_gdb_response(
+                    timeout_sec=POLL_TIMEOUT_SEC, raise_error_on_timeout=False
+                )
+
+                if not responses:
+                    continue
+
+                last_activity_time = time.time()
+
+                for response in responses:
+                    response_type = response.get("type")
+                    response_token = response.get("token")
+
+                    logger.debug(
+                        f"Execution cmd received: type={response_type}, "
+                        f"token={response_token}, message={response.get('message')}"
+                    )
+
+                    # Check for fatal GDB internal errors
+                    if response_type in ("console", "log"):
+                        payload = response.get("payload", "")
+                        payload_lower = payload.lower() if payload else ""
+                        if payload and (
+                            "internal-error" in payload_lower
+                            or "fatal error internal to gdb" in payload_lower
+                        ):
+                            logger.error(f"GDB internal fatal error: {payload}")
+                            if self.controller:
+                                try:
+                                    self.controller.exit()
+                                except Exception:
+                                    pass
+                                self.controller = None
+                                self.is_running = False
+                                self.target_loaded = False
+                                self.target_running = False
+                            if self.original_cwd:
+                                try:
+                                    os.chdir(self.original_cwd)
+                                except Exception:
+                                    pass
+                                self.original_cwd = None
+                            return {
+                                "status": "error",
+                                "message": f"GDB internal fatal error: {payload.strip()}",
+                                "command": command,
+                                "fatal": True,
+                            }
+
+                    # Check for result record matching our token
+                    if response_type == "result" and response_token == token:
+                        message = response.get("message", "")
+                        if message == "running":
+                            got_running = True
+                            self.target_running = True
+                            logger.debug("Target is now running")
+                        elif message == "error":
+                            # Command failed (e.g., "The program is not being run")
+                            error_msg = ""
+                            if response.get("payload"):
+                                error_msg = response["payload"].get(
+                                    "msg", str(response["payload"])
+                                )
+                            return {
+                                "status": "error",
+                                "message": error_msg or "Execution command failed",
+                                "command": command,
+                            }
+
+                    # Check for *stopped notification
+                    if response_type == "notify" and response.get("message") == "stopped":
+                        stopped_payload = response.get("payload", {})
+                        self.target_running = False
+                        reason = stopped_payload.get("reason", "unknown")
+                        logger.debug(f"Target stopped: reason={reason}")
+
+                        result: dict[str, Any] = {
+                            "status": "success",
+                            "command": command,
+                            "stopped_reason": reason,
+                        }
+
+                        if "frame" in stopped_payload:
+                            result["frame"] = stopped_payload["frame"]
+                        if "thread-id" in stopped_payload:
+                            result["thread_id"] = stopped_payload["thread-id"]
+
+                        # Flag program exit
+                        if reason in ("exited", "exited-normally", "exited-signalled"):
+                            result["exited"] = True
+                            if "exit-code" in stopped_payload:
+                                result["exit_code"] = stopped_payload["exit-code"]
+
+                        return result
+
+            except (BrokenPipeError, OSError) as e:
+                logger.error(f"Communication error: {e}")
+                return {"status": "error", "message": f"Communication error: {e}"}
+
+        # Timeout
+        elapsed = time.time() - start_time
+        if got_running:
+            self.target_running = True
+            return {
+                "status": "error",
+                "message": (
+                    f"Target still running after {timeout_sec}s of inactivity "
+                    f"(total: {elapsed:.1f}s). Use gdb_interrupt to pause it."
+                ),
+                "command": command,
+            }
+        else:
+            return {
+                "status": "error",
+                "message": f"Timeout waiting for command acknowledgment after {timeout_sec}s",
+                "command": command,
+            }
+
     def execute_command(
         self, command: str, timeout_sec: int = DEFAULT_TIMEOUT_SEC
     ) -> dict[str, Any]:
@@ -972,14 +1171,13 @@ class GDBSession:
         """
         Run the program (start execution from the beginning).
 
-        Waits for the program to stop (at a breakpoint, signal, or exit) before
-        returning. The (gdb) prompt indicates GDB is ready for subsequent commands.
+        Blocks until the program stops (at a breakpoint, signal, or exit).
 
         Args:
             args: Optional command-line arguments to pass to the program
 
         Returns:
-            Dict with status and execution result
+            Dict with stop reason, frame info, etc.
         """
         if not self.controller:
             return {"status": "error", "message": "No active GDB session"}
@@ -991,44 +1189,40 @@ class GDBSession:
             if result.get("status") == "error":
                 return result
 
-        # Run the program - execute_command waits for (gdb) prompt
-        return self.execute_command("-exec-run")
+        return self._send_execution_command("-exec-run")
 
     def continue_execution(self) -> dict[str, Any]:
         """
         Continue execution of the program.
 
-        Waits for the program to stop (at a breakpoint, signal, or exit) before
-        returning. The (gdb) prompt indicates GDB is ready for subsequent commands.
+        Blocks until the program stops (at a breakpoint, signal, or exit).
 
         Returns:
-            Dict with status and execution result
+            Dict with stop reason, frame info, etc.
         """
-        return self.execute_command("-exec-continue")
+        return self._send_execution_command("-exec-continue")
 
     def step(self) -> dict[str, Any]:
         """
         Step into (single source line, entering functions).
 
-        Waits for the step to complete before returning. The (gdb) prompt indicates
-        GDB is ready for subsequent commands.
+        Blocks until the step completes and the target stops.
 
         Returns:
-            Dict with status and execution result
+            Dict with stop reason, frame info, etc.
         """
-        return self.execute_command("-exec-step")
+        return self._send_execution_command("-exec-step")
 
     def next(self) -> dict[str, Any]:
         """
         Step over (next source line, not entering functions).
 
-        Waits for the step to complete before returning. The (gdb) prompt indicates
-        GDB is ready for subsequent commands.
+        Blocks until the step completes and the target stops.
 
         Returns:
-            Dict with status and execution result
+            Dict with stop reason, frame info, etc.
         """
-        return self.execute_command("-exec-next")
+        return self._send_execution_command("-exec-next")
 
     def interrupt(self) -> dict[str, Any]:
         """
@@ -1166,6 +1360,7 @@ class GDBSession:
             self.controller = None
             self.is_running = False
             self.target_loaded = False
+            self.target_running = False
 
             # Restore original working directory if it was changed during start()
             if self.original_cwd:
@@ -1192,6 +1387,7 @@ class GDBSession:
         return {
             "is_running": self.is_running,
             "target_loaded": self.target_loaded,
+            "target_running": self.target_running,
             "has_controller": self.controller is not None,
         }
 

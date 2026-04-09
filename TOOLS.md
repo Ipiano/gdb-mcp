@@ -230,19 +230,35 @@ List all breakpoints with structured data.
 - Confirm file paths resolved correctly
 
 ### `gdb_continue`
-Continue execution until next breakpoint.
+Continue execution until next breakpoint or completion.
+
+Blocks until the target stops and returns the stop reason.
 
 **IMPORTANT:** Only use when program is PAUSED (at a breakpoint). If program hasn't started, use `gdb_execute_command` with "run" instead.
+
+**Returns:**
+- `stopped_reason`: Why the target stopped (e.g., `breakpoint-hit`, `exited-normally`, `signal-received`)
+- `frame`: Current frame info (function, file, line) when stopped at a breakpoint
+- `thread_id`: Thread that caused the stop
+- `exited`: `true` if the program exited
 
 ### `gdb_step`
 Step into next instruction (enters functions).
 
+Blocks until the step completes and returns the new location.
+
 **IMPORTANT:** Only works when program is PAUSED at a specific location.
+
+**Returns:** Same as `gdb_continue`.
 
 ### `gdb_next`
 Step over to next line (doesn't enter functions).
 
+Blocks until the step completes and returns the new location.
+
 **IMPORTANT:** Only works when program is PAUSED at a specific location.
+
+**Returns:** Same as `gdb_continue`.
 
 ### `gdb_interrupt`
 Interrupt (pause) a running program.

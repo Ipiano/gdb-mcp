@@ -338,6 +338,8 @@ async def list_tools() -> list[Tool]:
             name="gdb_continue",
             description=(
                 "Continue execution of the program until next breakpoint or completion. "
+                "Blocks until the target stops and returns the stop reason (e.g., breakpoint-hit, "
+                "exited-normally, signal-received). "
                 "IMPORTANT: Only use this when the program is PAUSED (e.g., at a breakpoint). "
                 "If the program hasn't been started yet, use gdb_execute_command with 'run' instead. "
                 "If the program is already running, this will fail - use gdb_interrupt to pause it first. "
@@ -349,6 +351,7 @@ async def list_tools() -> list[Tool]:
             name="gdb_step",
             description=(
                 "Step into the next instruction (enters function calls). "
+                "Blocks until the step completes and returns the stop reason and new location. "
                 "IMPORTANT: Only works when program is PAUSED at a specific location. "
                 "Use this for single-stepping through code to debug line-by-line. "
                 "Requires session_id parameter (obtained from gdb_start_session)."
@@ -359,6 +362,7 @@ async def list_tools() -> list[Tool]:
             name="gdb_next",
             description=(
                 "Step over to the next line (doesn't enter function calls). "
+                "Blocks until the step completes and returns the stop reason and new location. "
                 "IMPORTANT: Only works when program is PAUSED at a specific location. "
                 "Use this to step over function calls without entering them. "
                 "Requires session_id parameter (obtained from gdb_start_session)."

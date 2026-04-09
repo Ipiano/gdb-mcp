@@ -15,6 +15,7 @@ class TestGDBSession:
         assert session.controller is None
         assert session.is_running is False
         assert session.target_loaded is False
+        assert session.target_running is False
 
     def test_get_status_no_session(self):
         """Test get_status when no session is running."""
@@ -473,66 +474,138 @@ class TestExecutionControl:
 
     @patch("gdb_mcp.gdb_interface.GdbController")
     def test_continue_execution(self, mock_controller_class):
-        """Test continue execution."""
+        """Test continue execution blocks until *stopped."""
         session = GDBSession()
-        session.controller = MagicMock()  # Just need a controller object
+        session.controller = MagicMock()
         session.is_running = True
 
-        # Mock execute_command since continue_execution now just calls it
         with patch.object(
             session,
-            "execute_command",
+            "_send_execution_command",
             return_value={
                 "status": "success",
-                "result": {"notify": [{"reason": "breakpoint-hit"}]},
+                "command": "-exec-continue",
+                "stopped_reason": "breakpoint-hit",
+                "frame": {"func": "main", "line": "10"},
             },
-        ) as mock_execute:
+        ) as mock_exec:
             result = session.continue_execution()
 
         assert result["status"] == "success"
-        mock_execute.assert_called_once_with("-exec-continue")
+        assert result["stopped_reason"] == "breakpoint-hit"
+        mock_exec.assert_called_once_with("-exec-continue")
 
     @patch("gdb_mcp.gdb_interface.GdbController")
     def test_step(self, mock_controller_class):
-        """Test step into."""
+        """Test step into blocks until *stopped."""
         session = GDBSession()
-        session.controller = MagicMock()  # Just need a controller object
+        session.controller = MagicMock()
         session.is_running = True
 
-        # Mock execute_command since step now just calls it
         with patch.object(
             session,
-            "execute_command",
+            "_send_execution_command",
             return_value={
                 "status": "success",
-                "result": {"notify": [{"reason": "end-stepping-range"}]},
+                "command": "-exec-step",
+                "stopped_reason": "end-stepping-range",
             },
-        ) as mock_execute:
+        ) as mock_exec:
             result = session.step()
 
         assert result["status"] == "success"
-        mock_execute.assert_called_once_with("-exec-step")
+        assert result["stopped_reason"] == "end-stepping-range"
+        mock_exec.assert_called_once_with("-exec-step")
 
     @patch("gdb_mcp.gdb_interface.GdbController")
     def test_next(self, mock_controller_class):
-        """Test step over."""
+        """Test step over blocks until *stopped."""
         session = GDBSession()
-        session.controller = MagicMock()  # Just need a controller object
+        session.controller = MagicMock()
         session.is_running = True
 
-        # Mock execute_command since next now just calls it
         with patch.object(
             session,
-            "execute_command",
+            "_send_execution_command",
             return_value={
                 "status": "success",
-                "result": {"notify": [{"reason": "end-stepping-range"}]},
+                "command": "-exec-next",
+                "stopped_reason": "end-stepping-range",
             },
-        ) as mock_execute:
+        ) as mock_exec:
             result = session.next()
 
         assert result["status"] == "success"
-        mock_execute.assert_called_once_with("-exec-next")
+        assert result["stopped_reason"] == "end-stepping-range"
+        mock_exec.assert_called_once_with("-exec-next")
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_run_blocks_until_stopped(self, mock_controller_class):
+        """Test run blocks until *stopped."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        with patch.object(
+            session,
+            "_send_execution_command",
+            return_value={
+                "status": "success",
+                "command": "-exec-run",
+                "stopped_reason": "breakpoint-hit",
+                "frame": {"func": "main"},
+                "thread_id": "1",
+            },
+        ) as mock_exec:
+            result = session.run()
+
+        assert result["status"] == "success"
+        assert result["stopped_reason"] == "breakpoint-hit"
+        mock_exec.assert_called_once_with("-exec-run")
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_execution_command_error(self, mock_controller_class):
+        """Test execution command when program is not running."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        with patch.object(
+            session,
+            "_send_execution_command",
+            return_value={
+                "status": "error",
+                "message": "The program is not being run.",
+                "command": "-exec-continue",
+            },
+        ):
+            result = session.continue_execution()
+
+        assert result["status"] == "error"
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_execution_command_program_exit(self, mock_controller_class):
+        """Test execution command when program exits."""
+        session = GDBSession()
+        session.controller = MagicMock()
+        session.is_running = True
+
+        with patch.object(
+            session,
+            "_send_execution_command",
+            return_value={
+                "status": "success",
+                "command": "-exec-continue",
+                "stopped_reason": "exited-normally",
+                "exited": True,
+                "exit_code": "0",
+            },
+        ):
+            result = session.continue_execution()
+
+        assert result["status"] == "success"
+        assert result["stopped_reason"] == "exited-normally"
+        assert result["exited"] is True
 
     def test_interrupt_no_controller(self):
         """Test interrupt when no session exists."""
