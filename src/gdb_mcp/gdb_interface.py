@@ -575,9 +575,77 @@ class GDBSession:
                 "command": command,
             }
 
+        # Check for multi-line CLI command (contains newlines after stripping)
+        stripped_command = command.strip()
+        is_multiline = "\n" in stripped_command
+
+        if is_multiline:
+            # Multi-line CLI commands (commands, define, if/else/end, python, etc.)
+            # can't be wrapped with -interpreter-exec console because GDB treats
+            # that as a single command and enters continuation mode waiting for
+            # more input, causing a deadlock.
+            #
+            # Instead, send each line raw to GDB's stdin (MI mode treats non-'-'
+            # lines as CLI input), then send a tokenized sentinel MI command.
+            # Collect all console output until the sentinel's result arrives.
+            lines = stripped_command.split("\n")
+
+            try:
+                for line in lines:
+                    self.controller.io_manager.stdin.write((line + "\n").encode())
+                self.controller.io_manager.stdin.flush()
+            except (BrokenPipeError, OSError) as e:
+                logger.error(f"Failed to send multi-line command: {e}")
+                return {
+                    "status": "error",
+                    "message": f"Failed to send command: {e}",
+                    "command": command,
+                }
+
+            # Send a sentinel MI command to know when GDB is done processing
+            sentinel_command = "-gdb-show prompt"
+            result = self._send_command_and_wait_for_prompt(sentinel_command, timeout_sec)
+
+            if "error" in result:
+                error_response = {
+                    "status": "error",
+                    "message": result["error"],
+                    "command": command,
+                }
+                if result.get("fatal"):
+                    error_response["fatal"] = True
+                return error_response
+
+            if result.get("timed_out"):
+                return {
+                    "status": "error",
+                    "message": f"Timeout waiting for command response after {timeout_sec}s",
+                    "command": command,
+                }
+
+            # Collect console output from responses, excluding the sentinel's
+            # result and GDB's continuation prompts (">")
+            command_responses = result.get("command_responses", [])
+            console_output = ""
+            for response in command_responses:
+                if response.get("type") == "console":
+                    payload = response.get("payload", "")
+                    if not payload:
+                        continue
+                    # Filter out continuation prompts
+                    if payload.strip() == ">":
+                        continue
+                    console_output += payload
+
+            return {
+                "status": "success",
+                "command": command,
+                "output": console_output.strip() if console_output else "(no output)",
+            }
+
         # Detect if this is a CLI command (doesn't start with '-')
         # CLI commands need to be wrapped with -interpreter-exec
-        is_cli_command = not command.strip().startswith("-")
+        is_cli_command = not stripped_command.startswith("-")
         actual_command = command
 
         if is_cli_command:
