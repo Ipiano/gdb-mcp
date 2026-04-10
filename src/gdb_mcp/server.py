@@ -137,6 +137,7 @@ class SetBreakpointArgs(BaseModel):
     location: str = Field(..., description="Breakpoint location (function, file:line, or *address)")
     condition: Optional[str] = Field(None, description="Conditional expression")
     temporary: bool = Field(False, description="Whether breakpoint is temporary")
+    hardware: bool = Field(False, description="Whether to use a hardware-assisted breakpoint")
 
 
 class EvaluateExpressionArgs(BaseModel):
@@ -286,6 +287,10 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Set a breakpoint at a function, file:line, or address. "
                 "Supports conditional breakpoints and temporary breakpoints. "
+                "Supports hardware-assisted breakpoints (using CPU debug registers), "
+                "which are needed for kernel debugging or when software breakpoints "
+                "can't modify target memory. Hardware breakpoints require a running "
+                "process; set them after the program has started, not before run. "
                 "Returns breakpoint details including number, address, and location. "
                 "Use gdb_list_breakpoints to verify breakpoints were set correctly. "
                 "Requires session_id parameter (obtained from gdb_start_session)."
@@ -498,6 +503,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     location=bp_args.location,
                     condition=bp_args.condition,
                     temporary=bp_args.temporary,
+                    hardware=bp_args.hardware,
                 )
 
             elif name == "gdb_list_breakpoints":

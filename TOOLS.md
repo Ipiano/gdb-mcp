@@ -174,12 +174,14 @@ Set a breakpoint at a location.
 - `location`: Function name, file:line, or *address
 - `condition` (optional): Conditional expression
 - `temporary`: Whether breakpoint is temporary (default: false)
+- `hardware`: Whether to use a hardware-assisted breakpoint (default: false). Hardware breakpoints use the CPU's debug registers (DR0-DR3) instead of modifying target memory. Use this for kernel debugging or when software breakpoints can't be used. **Note:** Hardware breakpoints require a running process; set them after the program has started (e.g., after hitting a regular breakpoint), not before `run`.
 
 **Examples:**
 - `location: "main"` - Break at main function
 - `location: "foo.c:42"` - Break at line 42 of foo.c
 - `location: "*0x12345678"` - Break at memory address
 - `condition: "x > 10"` - Only break when x > 10
+- `hardware: true` - Use hardware breakpoint (for kernel debugging)
 
 ### `gdb_list_breakpoints`
 List all breakpoints with structured data.

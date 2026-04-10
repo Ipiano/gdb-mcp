@@ -438,6 +438,31 @@ class TestBreakpointOperations:
         assert any("-break-insert" in cmd for cmd in commands_executed)
 
     @patch("gdb_mcp.gdb_interface.GdbController")
+    def test_set_breakpoint_hardware(self, mock_controller_class):
+        """Test setting a hardware breakpoint."""
+        mock_controller = MagicMock()
+        session = GDBSession()
+        session.controller = mock_controller
+        session.is_running = True
+
+        commands_executed = []
+
+        def mock_execute(cmd, **kwargs):
+            commands_executed.append(cmd)
+            return {
+                "status": "success",
+                "result": {"result": {"bkpt": {"number": "1", "type": "hw breakpoint"}}},
+            }
+
+        with patch.object(session, "execute_command", side_effect=mock_execute):
+            result = session.set_breakpoint("main", hardware=True)
+
+        assert result["status"] == "success"
+        # Verify the command includes the -h flag
+        assert any("-h" in cmd for cmd in commands_executed)
+        assert any("-break-insert" in cmd for cmd in commands_executed)
+
+    @patch("gdb_mcp.gdb_interface.GdbController")
     def test_list_breakpoints(self, mock_controller_class):
         """Test listing breakpoints."""
         mock_controller = MagicMock()
